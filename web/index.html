@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>考勤核对系统</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;font-size:14px;background:#EEF2F7;color:#1e2533;line-height:1.6}
+:root{
+  --navy:#0D2B55;--blue:#1A5FB4;--blue-mid:#2970C8;--blue-light:#E8F0FD;
+  --green:#2D7D46;--green-light:#E6F4EC;
+  --red:#C0392B;--red-light:#FCECEA;
+  --amber:#B45309;--amber-light:#FEF3E2;
+  --gray:#637083;--gray-light:#F3F5F8;--border:#DDE3EE;--card-bg:#FFFFFF;--radius:10px;
+  --shadow:0 1px 4px rgba(13,43,85,.07),0 2px 12px rgba(13,43,85,.05);
+  --shadow-sm:0 1px 3px rgba(13,43,85,.06);
+}
+
+/* ===== TOPBAR ===== */
+.topbar{background:linear-gradient(90deg,#0D2B55 0%,#1A4F8C 100%);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(13,43,85,.25)}
+.topbar-left{display:flex;align-items:center;gap:12px}
+.topbar-logo{width:34px;height:34px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.22);border-radius:8px;display:flex;align-items:center;justify-content:center}
+.topbar-logo svg{width:18px;height:18px}
+.topbar-brand{color:#fff;font-size:16px;font-weight:600;letter-spacing:.3px}
+.topbar-sub{font-size:11px;color:rgba(255,255,255,.6);margin-top:1px}
+.topbar-right{display:flex;align-items:center;gap:14px}
+
+.status-badge{display:flex;align-items:center;gap:6px;font-size:12px;padding:4px 13px;border-radius:20px}
+.status-badge.online{border:1px solid rgba(34,197,94,.35);background:rgba(34,197,94,.08);color:#86EFAC}
+.status-badge.offline{border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.08);color:#FCD34D}
+.status-dot{width:7px;height:7px;border-radius:50%;animation:pulse 2s infinite}
+.status-badge.online .status-dot{background:#22C55E;box-shadow:0 0 8px rgba(34,197,94,.5)}
+.status-badge.offline .status-dot{background:#F59E0B;box-shadow:0 0 8px rgba(245,158,11,.5)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.clock{color:rgba(255,255,255,.6);font-size:12px;font-variant-numeric:tabular-nums}
+
+/* ===== MAIN LAYOUT ===== */
+.main{padding:22px 28px;max-width:1400px;margin:0 auto}
+
+/* ===== SECTION TITLE ===== */
+.section-title{font-size:13px;font-weight:600;color:var(--gray);margin-bottom:12px;display:flex;align-items:center;gap:6px;letter-spacing:.4px}
+.section-title::before{content:'';width:3.5px;height:15px;background:var(--blue);border-radius:2px;flex-shrink:0}
+
+/* ===== FILTER BAR ===== */
+.filter-bar{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;margin-bottom:20px;display:flex;flex-wrap:wrap;align-items:end;gap:14px;box-shadow:var(--shadow-sm)}
+.filter-group{display:flex;flex-direction:column;gap:4px}
+.filter-group label{font-size:11px;font-weight:600;color:var(--gray);letter-spacing:.3px}
+.filter-group input,.filter-group select{height:36px;border:1px solid var(--border);border-radius:7px;padding:0 12px;font-size:13px;background:#FAFBFD;color:#1e2533;outline:none;transition:border .2s}
+.filter-group input:focus,.filter-group select:focus{border-color:var(--blue-mid);box-shadow:0 0 0 3px rgba(41,112,200,.1)}
+.filter-group input[type="date"]{width:155px}
+.filter-group select{min-width:140px}
+.filter-check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--gray);cursor:pointer;padding-bottom:2px}
+.filter-check input{width:15px;height:15px;accent-color:var(--blue)}
+.btn-start{height:36px;padding:0 28px;border:none;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;color:#fff;background:linear-gradient(135deg,#1A5FB4,#2970C8);box-shadow:0 2px 8px rgba(26,95,180,.25);transition:all .2s;white-space:nowrap}
+.btn-start:hover{background:linear-gradient(135deg,#1454A0,#1A4FB4);box-shadow:0 4px 12px rgba(26,95,180,.35);transform:translateY(-1px)}
+.btn-start:disabled{opacity:.5;cursor:not-allowed;transform:none}
+
+/* ===== UPLOAD CARDS (简洁紧凑风格，参考旧版) ===== */
+.upload-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:22px}
+.upload-card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm);transition:box-shadow .2s,transform .2s;padding:24px 18px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px;min-height:180px;justify-content:center}
+.upload-card:hover{box-shadow:var(--shadow);transform:translateY(-2px)}
+.upload-card-icon{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:4px}
+.upload-card-icon.blue{background:var(--blue-light)}
+.upload-card-icon.amber{background:var(--amber-light)}
+.upload-card-icon.green{background:var(--green-light)}
+.upload-card-title{font-size:15px;font-weight:700;color:#1e2533}
+.upload-card-sub{font-size:11px;color:var(--gray);margin-top:-2px}
+.upload-area{width:100%;border:2px dashed var(--border);border-radius:10px;padding:18px 10px;cursor:pointer;transition:all .25s;position:relative;margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:4px}
+.upload-area:hover{border-color:var(--blue-mid);background:var(--blue-light)}
+.upload-area.filled{border:2px solid var(--green);background:var(--green-light)}
+.upload-area input[type="file"]{position:absolute;inset:0;opacity:0;cursor:pointer}
+.upload-area-symbol{font-size:26px;line-height:1;color:var(--gray)}
+.upload-area-hint{font-size:12px;color:var(--gray)}
+.upload-area.filled .upload-area-hint{color:var(--green);font-weight:600;font-size:12px}
+
+/* ===== PROGRESS BAR AREA (替代KPI卡片) ===== */
+.progress-area{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:18px 22px;margin-bottom:22px;box-shadow:var(--shadow-sm)}
+.progress-area-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.progress-area-label{font-size:12px;font-weight:600;color:var(--gray)}
+.progress-area-stats{display:flex;gap:20px;font-size:12px}
+.progress-stat{display:flex;align-items:center;gap:5px;color:var(--gray)}
+.progress-stat b{color:#1e2533;font-weight:700}
+.progress-bar-track{height:8px;background:#E8ECF2;border-radius:4px;overflow:hidden}
+.progress-bar-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--blue),#60A5FA,var(--green));transition:width .5s ease;width:0}
+.progress-steps{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:#9CA3AF}
+.progress-step{display:flex;align-items:center;gap:4px}
+.step-dot{width:6px;height:6px;border-radius:50%;background:#D1D5DB}
+.step-dot.active{background:var(--blue);box-shadow:0 0 6px rgba(26,95,180,.4)}
+.step-dot.done{background:var(--green)}
+
+/* ===== TASK PROGRESS PANEL ===== */
+.task-panel{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-sm);margin-bottom:22px}
+.task-header{padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #F3F5F8}
+.task-title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+.task-tag{font-size:11px;padding:2px 10px;border-radius:4px;font-weight:600;animation:pulse 2s infinite}
+.task-tag.pending{background:#FEF3C7;color:#92400E}
+.task-tag.running{background:var(--blue-light);color:var(--blue)}
+.task-tag.done{background:var(--green-light);color:var(--green)}
+.task-tag.error{background:var(--red-light);color:var(--red)}
+
+.task-bar{height:5px;background:#E8ECF2}
+.task-bar-fill{height:100%;background:linear-gradient(90deg,var(--blue),#60A5FA);border-radius:3px;transition:width .6s ease;width:0}
+
+.terminal{margin:14px 20px 16px;background:#0F172A;border-radius:8px;padding:14px 16px;max-height:220px;overflow-y:auto;font-family:'Cascadia Code','Fira Code','Consolas',monospace;font-size:12px;line-height:1.7}
+.terminal::-webkit-scrollbar{width:5px}
+.terminal::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+.t-line{color:#94A3B8;white-space:pre-wrap;word-break:break-all}
+.t-line.info{color:#60A5FA}
+.t-line.success{color:#34D399}
+.t-line.error{color:#F87171}
+.t-line.warn{color:#FBBF24}
+
+/* ===== RESULT BANNER ===== */
+.result-banner{background:linear-gradient(135deg,#ECFDF5,#D1FAE5);border:1px solid #86EFAC;border-radius:var(--radius);padding:18px 24px;display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;animation:fadeIn .4s ease}
+.result-info{display:flex;align-items:center;gap:14px}
+.result-icon{font-size:28px}
+.result-title{font-size:15px;font-weight:700;color:#065F46}
+.result-sub{font-size:12px;color:#047857;margin-top:2px}
+.btn-download{padding:10px 24px;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;color:#fff;background:linear-gradient(135deg,#059669,#10B981);box-shadow:0 2px 10px rgba(5,150,105,.3);transition:all .2s}
+.btn-download:hover{background:linear-gradient(135deg,#047857,#059669);transform:translateY(-1px)}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+
+/* ===== FOOTER ===== */
+.footer{padding:18px 0;text-align:center;font-size:11px;color:#9CA3AF;border-top:1px solid var(--border);margin-top:10px}
+
+/* ===== RESPONSIVE ===== */
+@media(max-width:1024px){
+  .upload-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:640px){
+  .main{padding:14px}
+  .topbar{padding:0 14px}
+  .upload-grid{grid-template-columns:1fr}
+  .filter-bar{flex-direction:column;align-items:stretch}
+  .btn-start{width:100%}
+  .progress-area-stats{flex-wrap:wrap;gap:10px}
+}
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="topbar-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+    </div>
+    <div>
+      <div class="topbar-brand">考勤核对系统</div>
+      <div class="topbar-sub">Attendance Verification</div>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="status-badge" id="statusBadge">
+      <div class="status-dot"></div>
+      <span id="statusText">检测中...</span>
+    </div>
+    <div class="clock" id="clock"></div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- 查询条件（保留不动） -->
+  <div class="section-title">查询条件</div>
+  <div class="filter-bar">
+    <div class="filter-group">
+      <label>起始日期</label>
+      <input type="date" id="startDate">
+    </div>
+    <div class="filter-group">
+      <label>截止日期</label>
+      <input type="date" id="endDate">
+    </div>
+    <label class="filter-check">
+      <input type="checkbox" id="wholeMonth" checked> 按整月自动计算
+    </label>
+    <div class="filter-group">
+      <label>部门</label>
+      <select id="department">
+        <option>审计一部</option>
+        <option>审计二部</option>
+        <option>审计三部</option>
+        <option>审计四部</option>
+        <option>审计五部</option>
+        <option>工程造价一部</option>
+        <option>税务一部</option>
+        <option>创新审计部</option>
+        <option>管理咨询部</option>
+      </select>
+    </div>
+    <button class="btn-start" id="btnStart" disabled>开始核对</button>
+  </div>
+
+  <!-- 数据源上传（简洁紧凑风格） -->
+  <div class="section-title">上传数据源</div>
+  <div class="upload-grid">
+
+    <!-- BI模板 -->
+    <div class="upload-card">
+      <div class="upload-card-icon blue">&#128196;</div>
+      <div class="upload-card-title">BI考勤模板</div>
+      <div class="upload-card-sub">考勤表-明细.xlsx</div>
+      <div class="upload-area" id="area1">
+        <span class="upload-area-symbol">+</span>
+        <span class="upload-area-hint">点击或拖拽上传</span>
+        <input type="file" accept=".xlsx,.xls" id="file1">
+      </div>
+    </div>
+
+    <!-- 打卡日报 -->
+    <div class="upload-card">
+      <div class="upload-card-icon amber">&#128339;</div>
+      <div class="upload-card-title">打卡日报</div>
+      <div class="upload-card-sub">上下班打卡_日报.xlsx</div>
+      <div class="upload-area" id="area2">
+        <span class="upload-area-symbol">+</span>
+        <span class="upload-area-hint">点击或拖拽上传</span>
+        <input type="file" accept=".xlsx,.xls" id="file2">
+      </div>
+    </div>
+
+    <!-- 休假申请 -->
+    <div class="upload-card">
+      <div class="upload-card-icon green">&#127968;</div>
+      <div class="upload-card-title">休假申请</div>
+      <div class="upload-card-sub">leavareq.xls</div>
+      <div class="upload-area" id="area3">
+        <span class="upload-area-symbol">+</span>
+        <span class="upload-area-hint">点击或拖拽上传</span>
+        <input type="file" accept=".xlsx,.xls" id="file3">
+      </div>
+    </div>
+    <!-- 远程办公 -->
+    <div class="upload-card">
+      <div class="upload-card-icon purple">&#128187;</div>
+      <div class="upload-card-title">远程办公</div>
+      <div class="upload-card-sub">remoteWorkApp.xls</div>
+      <div class="upload-area" id="area4">
+        <span class="upload-area-symbol">+</span>
+        <span class="upload-area-hint">点击或拖拽上传</span>
+        <input type="file" accept=".xlsx,.xls" id="file4">
+      </div>
+    </div>
+  </div>
+
+  <!-- 进度条区域（替代KPI卡片） -->
+  <div class="progress-area">
+    <div class="progress-area-header">
+      <span class="progress-area-label">准备状态</span>
+      <div class="progress-area-stats">
+        <span class="progress-stat">期间: <b id="pPeriod">--</b></span>
+        <span class="progress-stat">部门: <b id="pDept">--</b></span>
+        <span class="progress-stat">文件: <b id="pFiles">0/3</b></span>
+        <span class="progress-stat" id="pPctWrap"><b id="pPct">0%</b></span>
+      </div>
+    </div>
+    <div class="progress-bar-track"><div class="progress-bar-fill" id="prepBar"></div></div>
+    <div class="progress-steps">
+     <span class="progress-step"><span class="step-dot" id="step1"></span> 选择日期</span>
+     <span class="progress-step"><span class="step-dot" id="step2"></span> 上传模板</span>
+    <span class="progress-step"><span class="step-dot" id="step3"></span> 上传打卡</span>
+    <span class="progress-step"><span class="step-dot" id="step4"></span> 上传休假</span>
+    <span class="progress-step"><span class="step-dot" id="step5"></span> 上传远程</span>
+    <span class="progress-step"><span class="step-dot" id="step6"></span> 开始核对</span>
+    </div>
+  </div>
+
+  <!-- 任务执行面板 -->
+  <div class="task-panel" id="taskPanel" style="display:none">
+    <div class="task-header">
+      <div class="task-title">
+        <span>核对进度</span>
+        <span class="task-tag pending" id="taskTag">等待中</span>
+      </div>
+    </div>
+    <div class="task-bar"><div class="task-bar-fill" id="taskBarFill"></div></div>
+    <div class="terminal" id="terminal">
+      <div class="t-line info">等待开始核对...</div>
+    </div>
+  </div>
+
+  <!-- 结果下载 -->
+  <div class="result-banner" id="resultBanner" style="display:none">
+    <div class="result-info">
+      <div class="result-icon">&#10004;&#65039;</div>
+      <div>
+        <div class="result-title">核对完成！结果文件已生成</div>
+        <div class="result-sub" id="resultSub">点击右侧按钮下载 Excel 文件</div>
+      </div>
+    </div>
+    <button class="btn-download" id="btnDownload">下载结果 Excel</button>
+  </div>
+
+  <!-- 页脚 -->
+  <div class="footer">
+    考勤核对系统 v3.1 &nbsp;|&nbsp; 后端一体化 &nbsp;|&nbsp; 五色规则：绿色=正常 &nbsp;蓝色=打卡 &nbsp;红色=缺卡 &nbsp;琥珀=休假 &nbsp;灰色=非工作日
+  </div>
+</div>
+
+<script>
+const API_BASE = '';
+let uploadedFiles = { template: null, checkin: null, leave: null, remote: null };
+let currentTaskId = null;
+let pollingTimer = null;
+
+// ===== 初始化 =====
+document.addEventListener('DOMContentLoaded', () => {
+  initDateDefaults();
+  initClock();
+  initUploadHandlers();
+  checkBackendHealth();
+  setInterval(checkBackendHealth, 8000);
+});
+
+function initDateDefaults() {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  const firstDay = `${y}-${String(m+1).padStart(2,'0')}-01`;
+  const lastDay = `${y}-${String(m+1).padStart(2,'0')}-${String(new Date(y,m+1,0).getDate()).padStart(2,'0')}`;
+  document.getElementById('startDate').value = firstDay;
+  document.getElementById('endDate').value = lastDay;
+  document.getElementById('startDate').addEventListener('change', autoFillMonth);
+  updatePrepBar();
+}
+
+function autoFillMonth() {
+  if (!document.getElementById('wholeMonth').checked) return;
+  const v = document.getElementById('startDate').value;
+  if (!v) return;
+  const [y,m] = v.split('-').map(Number);
+  document.getElementById('endDate').value = `${y}-${String(m).padStart(2,'0')}-${String(new Date(y,m,0).getDate()).padStart(2,'0')}`;
+  updatePrepBar();
+}
+
+function initClock() {
+  const tick = () => { document.getElementById('clock').textContent = new Date().toLocaleTimeString('zh-CN',{hour12:false}); };
+  tick(); setInterval(tick, 1000);
+}
+
+// ===== 健康检测 =====
+async function checkBackendHealth() {
+  const badge = document.getElementById('statusBadge');
+  const text = document.getElementById('statusText');
+  try {
+    const r = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(4000) });
+    if (r.ok) { badge.className='status-badge online'; text.textContent='后端在线'; }
+    else throw 0;
+  } catch { badge.className='status-badge offline'; text.textContent='后端离线'; }
+  updateStartBtn();
+}
+
+// ===== 文件上传 =====
+function initUploadHandlers() {
+  const pairs = [
+    { file:'file1', area:'area1', key:'template' },
+    { file:'file2', area:'area2', key:'checkin' },
+    { file:'file3', area:'area3', key:'leave' },
+    { file:'file4', area:'area4', key:'remote' }
+  ];
+  pairs.forEach(p => {
+    const input = document.getElementById(p.file);
+    const area = document.getElementById(p.area);
+    input.addEventListener('change', () => {
+      if (input.files.length > 0) {
+        uploadedFiles[p.key] = input.files[0];
+        area.classList.add('filled');
+        area.querySelector('.upload-area-symbol').textContent = '✅';
+        area.querySelector('.upload-area-hint').textContent = input.files[0].name;
+        updatePrepBar();
+        updateStartBtn();
+      }
+    });
+    area.addEventListener('dragover', e => { e.preventDefault(); area.style.borderColor='var(--blue-mid)'; });
+    area.addEventListener('dragleave', () => { area.style.borderColor=''; });
+    area.addEventListener('drop', e => {
+      e.preventDefault(); area.style.borderColor='';
+      if (e.dataTransfer.files.length > 0) { input.files=e.dataTransfer.files; input.dispatchEvent(new Event('change')); }
+    });
+  });
+
+  // 监听日期/部门变化
+  ['startDate','endDate','department'].forEach(id =>
+    document.getElementById(id).addEventListener('change', updatePrepBar)
+  );
+}
+
+function updatePrepBar() {
+  const s=document.getElementById('startDate').value, e=document.getElementById('endDate').value;
+  document.getElementById('pPeriod').textContent = s&&e ? `${s} ~ ${e}` : '--';
+  document.getElementById('pDept').textContent = document.getElementById('department').value;
+  const count = [uploadedFiles.template, uploadedFiles.checkin, uploadedFiles.leave, uploadedFiles.remote].filter(Boolean).length;
+  document.getElementById('pFiles').textContent = `${count}/4`;
+  document.getElementById('pPct').textContent = `${Math.round(count/4*100)}%`;
+  document.getElementById('prepBar').style.width = `${Math.round(count/4*100)}%`;
+
+  // 步骤点
+  const hasDate = !!s && !!e;
+  setStep(1, hasDate);
+  setStep(2, hasDate && !!uploadedFiles.template);
+  setStep(3, hasDate && !!uploadedFiles.checkin);
+  setStep(4, hasDate && !!uploadedFiles.leave);
+  setStep(5, hasDate && !!uploadedFiles.remote);
+  setStep(6, false);
+}
+
+function setStep(i, active) {
+  const el = document.getElementById(`step${i}`);
+  if (active) el.className = 'step-dot active';
+  else el.className = 'step-dot';
+}
+
+function updateStartBtn() {
+  const all = uploadedFiles.template && uploadedFiles.checkin && uploadedFiles.leave;
+  const online = document.getElementById('statusBadge').classList.contains('online');
+  document.getElementById('btnStart').disabled = !(all && online);
+}
+
+// ===== 开始核对 =====
+document.getElementById('btnStart').addEventListener('click', startCheck);
+
+async function startCheck() {
+  const btn = document.getElementById('btnStart');
+  btn.disabled=true; btn.textContent='核对中...';
+
+  const panel = document.getElementById('taskPanel');
+  panel.style.display='block';
+  document.getElementById('resultBanner').style.display='none';
+  document.getElementById('terminal').innerHTML='<div class="t-line info">正在提交文件...</div>';
+  setTaskTag('pending','提交中');
+  document.getElementById('taskBarFill').style.width='0';
+  setStep(6,true);
+
+  const startVal = document.getElementById('startDate').value;
+  const endVal = document.getElementById('endDate').value;
+
+  const fd = new FormData();
+  fd.append('start_date', startVal);
+  fd.append('end_date', endVal);
+  fd.append('department', document.getElementById('department').value);
+  fd.append('template', uploadedFiles.template);
+  fd.append('checkin', uploadedFiles.checkin);
+  fd.append('leave', uploadedFiles.leave);
+  if (uploadedFiles.remote) {
+    fd.append('remote', uploadedFiles.remote);
+  }
+  try {
+    const res = await fetch(`${API_BASE}/upload_and_check`, { method:'POST', body:fd });
+    if (!res.ok) { const err=await res.json().catch(()=>({detail:'提交失败'})); throw new Error(err.detail||'提交失败'); }
+    const data = await res.json();
+    currentTaskId = data.task_id;
+    addLine('info',`任务已提交 ID:${currentTaskId}`);
+    startPolling(currentTaskId);
+  } catch(e) {
+    addLine('error',`提交失败: ${e.message}`); setTaskTag('error','失败'); resetBtn(); setStep(6,false);
+  }
+}
+
+function startPolling(tid) {
+  if (pollingTimer) clearInterval(pollingTimer);
+  let lastIdx=0, prog=0;
+
+  pollingTimer=setInterval(async()=>{
+    try {
+      const res = await fetch(`${API_BASE}/task/${tid}`);
+      if (!res.ok) return;
+      const d = await res.json();
+
+      d.logs.slice(lastIdx).forEach(log=>{
+        let cls='info';
+        if(/失败|异常|错误/.test(log)) cls='error';
+        else if(/完成|已保存|结果/.test(log)) cls='success';
+        else if(/警告|注意/.test(log)) cls='warn';
+        addLine(cls,log);
+      }); lastIdx=d.logs.length;
+
+      if(d.status==='running'){
+        prog=Math.min(prog+8,90);
+        document.getElementById('taskBarFill').style.width=prog+'%';
+        setTaskTag('running','核对中...');
+      }
+
+      if(d.status==='done'){
+        clearInterval(pollingTimer);
+        document.getElementById('taskBarFill').style.width='100%';
+        setTaskTag('done','已完成');
+        showResult(d.result_file);
+        resetBtn();
+      }
+
+      if(d.status==='error'){ clearInterval(pollingTimer); setTaskTag('error','失败'); resetBtn(); setStep(6,false); }
+
+    } catch(e){ /* 继续轮询 */ }
+  },1500);
+}
+
+function addLine(cls,text){
+  const t=document.getElementById('terminal'),d=document.createElement('div');
+  d.className=`t-line ${cls}`; d.textContent=text; t.appendChild(d); t.scrollTop=t.scrollHeight;
+}
+function setTaskTag(st,text){ const el=document.getElementById('taskTag'); el.className=`task-tag ${st}`; el.textContent=text; }
+
+function showResult(fn){
+  const b=document.getElementById('resultBanner');
+  b.style.display='flex';
+  document.getElementById('resultSub').textContent=`文件: ${fn||'考勤明细.xlsx'}`;
+  document.getElementById('btnDownload').onclick=()=>{ window.open(`${API_BASE}/download/${fn}`,'_blank'); };
+}
+function resetBtn(){ const b=document.getElementById('btnStart'); b.disabled=false; b.textContent='开始核对'; }
+</script>
+</body>
+</html>
