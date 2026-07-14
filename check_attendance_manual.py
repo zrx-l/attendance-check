@@ -11,6 +11,7 @@ import argparse
 import openpyxl
 from openpyxl.styles import PatternFill, Alignment
 from openpyxl.utils import get_column_letter
+from openpyxl.styles.colors import COLOR_INDEX  # 新增：用于索引颜色映射
 
 # ================== 颜色常量 ==================
 GREEN_RGB = "00FF00"
@@ -171,6 +172,30 @@ def generate_cell_text(emp_id, date, leaves, checkins):
         return " ".join(parts)
     return "缺卡2次"
 
+def get_cell_color(cell):
+    """安全获取单元格背景色，返回六位十六进制颜色字符串（如 'FF0000'），失败返回 None"""
+    fill = cell.fill
+    if fill and isinstance(fill, PatternFill):
+        fg = fill.fgColor
+        if fg:
+            # 处理 RGB 类型
+            if fg.type == 'rgb':
+                rgb = fg.rgb
+                if isinstance(rgb, str):
+                    if rgb.startswith('FF'):
+                        return rgb[2:].upper()
+                    else:
+                        return rgb.upper()
+            # 处理索引颜色
+            elif fg.type == 'indexed':
+                color = COLOR_INDEX.get(fg.indexed)
+                if color:
+                    if color.startswith('FF'):
+                        return color[2:].upper()
+                    else:
+                        return color.upper()
+    return None
+
 def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file):
     # 打开模板
     wb = openpyxl.load_workbook(template_path, data_only=True)
@@ -272,38 +297,21 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             workday_count = 0
             for col2, date2 in date_cols.items():
                 if start <= date2 <= end:
-                    cell = ws.cell(row=row, column=col2)
-                    fill = cell.fill
-                    color_hex = None
-                    if fill and isinstance(fill, PatternFill):
-                        fg = fill.fgColor
-                        if fg and fg.type == 'rgb':
-                            color_hex = fg.rgb[2:] if fg.rgb.startswith('FF') else fg.rgb
+                    color_hex = get_cell_color(ws.cell(row=row, column=col2))
                     if color_hex and color_hex not in SKIP_COLORS:
                         workday_count += 1
             if workday_count > 0:
                 daily_hours = total_hours / workday_count
                 for col2, date2 in date_cols.items():
                     if start <= date2 <= end:
-                        cell = ws.cell(row=row, column=col2)
-                        fill = cell.fill
-                        color_hex = None
-                        if fill and isinstance(fill, PatternFill):
-                            fg = fill.fgColor
-                            if fg and fg.type == 'rgb':
-                                color_hex = fg.rgb[2:] if fg.rgb.startswith('FF') else fg.rgb
+                        color_hex = get_cell_color(ws.cell(row=row, column=col2))
                         if color_hex and color_hex not in SKIP_COLORS:
                             leave_assignment[(emp_id, date2)] = (leave_type, daily_hours)
 
         # 遍历日期列
         for col, date in date_cols.items():
             cell = ws.cell(row=row, column=col)
-            fill = cell.fill
-            color_hex = None
-            if fill and isinstance(fill, PatternFill):
-                fg = fill.fgColor
-                if fg and fg.type == 'rgb':
-                    color_hex = fg.rgb[2:] if fg.rgb.startswith('FF') else fg.rgb
+            color_hex = get_cell_color(cell)
             if not color_hex:
                 continue
             if color_hex in SKIP_COLORS:
@@ -372,6 +380,7 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             dst = ws_new.cell(row=r, column=c)
             dst.value = src.value
             if src.has_style:
+                # 使用 openpyxl 的 copy 方法，避免 deprecation warning
                 dst.font = src.font.copy()
                 dst.border = src.border.copy()
                 dst.fill = src.fill.copy()
@@ -383,12 +392,7 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     for row in range(6, max_row + 1):
         for col in date_cols.keys():
             cell = ws_new.cell(row=row, column=col)
-            fill = cell.fill
-            color_hex = None
-            if fill and isinstance(fill, PatternFill):
-                fg = fill.fgColor
-                if fg and fg.type == 'rgb':
-                    color_hex = fg.rgb[2:] if fg.rgb.startswith('FF') else fg.rgb
+            color_hex = get_cell_color(cell)
             if color_hex and color_hex.lower() in ["ff0000", "0000ff"]:
                 continue
             else:
