@@ -4,16 +4,18 @@ import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
 
 import pandas as pd
-import win32com.client as win32
 from pathlib import Path
 from datetime import datetime, timedelta
 import re
 import argparse
+import openpyxl
+from openpyxl.styles import PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 
 # ================== 颜色常量 ==================
-GREEN_RGB = 65280       # RGB(0,255,0)
-GRAY_RGB = 8421504      # RGB(128,128,128)
-WHITE_RGB = 16777215    # RGB(255,255,255) 白色（离职人员）
+GREEN_RGB = "00FF00"
+GRAY_RGB = "808080"
+WHITE_RGB = "FFFFFF"
 
 # ================== 打卡日报列映射 ==================
 CHECKIN_SHEET = 1
@@ -26,7 +28,6 @@ CHECKIN_COL_STATUS = 9
 HIDE_JOB_LEVELS = ["总监（业务）", "高级经理（业务）", "经理（业务）", "副经理（业务）"]
 
 def parse_leave_data(file_path):
-    """解析休假文件，返回 (emp_id, date) -> (leave_type, total_hours, start, end)"""
     df = pd.read_excel(file_path, header=0, skiprows=[1], dtype=str)
     df.columns = df.columns.str.strip()
     leaves = {}
@@ -90,7 +91,6 @@ def parse_checkin_data(file_path):
     return checkins
 
 def parse_remote_data(file_path):
-    """解析远程办公申请文件，返回 {(emp_id, date): (申请类型, 地点)}"""
     try:
         df = pd.read_excel(file_path, header=0, dtype=str)
         remote_dict = {}
@@ -119,7 +119,7 @@ def parse_remote_data(file_path):
         print(f"读取远程办公文件失败: {e}")
         return {}
 
-def get_date_from_cell(cell_value):
+def get_date_from_cell_value(cell_value):
     if isinstance(cell_value, datetime):
         return cell_value.date()
     s = str(cell_value).strip()
@@ -131,14 +131,7 @@ def get_date_from_cell(cell_value):
         return datetime.strptime(s[:10], "%Y-%m-%d").date()
     return None
 
-def is_weekend(date):
-    return date.weekday() >= 5
-
 def generate_cell_text(emp_id, date, leaves, checkins):
-    """
-    生成基础文本（非休假场景）
-    注意：此函数中的 leaves 仅用于判断，实际休假已由主函数处理，此处传空字典即可
-    """
     if (emp_id, date) in leaves:
         leave_type, hours = leaves[(emp_id, date)]
         text = f"{leave_type}{hours}h"
@@ -178,267 +171,254 @@ def generate_cell_text(emp_id, date, leaves, checkins):
         return " ".join(parts)
     return "缺卡2次"
 
-def process_template_win32com(template_path, leaves, checkins, remote_dict, output_file):
-    excel = win32.Dispatch('Excel.Application')
-    excel.Visible = False
-    excel.DisplayAlerts = False
-    excel.AskToUpdateLinks = False
-    excel.EnableEvents = False
-    wb = None
-    try:
-        wb = excel.Workbooks.Open(template_path)
-        ws = wb.Worksheets("报表区")
-        
-        try:
-            ws.Unprotect()
-        except:
-            pass
-        
-        # 识别日期列
-        date_row = 4
-        first_date_col = 16
-        date_cols = {}
-        col = first_date_col
-        empty_count = 0
-        max_empty = 3
-        while True:
-            cell_value = ws.Cells(date_row, col).Value
-            if cell_value is None or str(cell_value).strip() == "":
-                empty_count += 1
-                if empty_count >= max_empty:
-                    break
-                col += 1
-                continue
-            empty_count = 0
-            date = get_date_from_cell(cell_value)
-            if date:
-                date_cols[col] = date
+def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file):
+    # 打开模板
+    wb = openpyxl.load_workbook(template_path, data_only=True)
+    ws = wb["报表区"]
+
+    # 识别日期列
+    date_row = 4
+    first_date_col = 16
+    date_cols = {}
+    col = first_date_col
+    empty_count = 0
+    max_empty = 3
+    while True:
+        cell_value = ws.cell(row=date_row, column=col).value
+        if cell_value is None or str(cell_value).strip() == "":
+            empty_count += 1
+            if empty_count >= max_empty:
+                break
             col += 1
-        
-        if not date_cols:
-            print("错误：未能识别日期列，请检查模板！")
-            sys.stdout.flush()
-            return
-        print(f"识别到的日期列数: {len(date_cols)}")
+            continue
+        empty_count = 0
+        date = get_date_from_cell_value(cell_value)
+        if date:
+            date_cols[col] = date
+        col += 1
+
+    if not date_cols:
+        print("错误：未能识别日期列，请检查模板！")
         sys.stdout.flush()
-        
-        # 动态识别实际数据行数
-        last_row = 6
-        for r in range(6, 501):
-            val = ws.Cells(r, 2).Value
-            if val is not None and str(val).strip() != "":
-                last_row = r
-            else:
-                empty_count = 0
-                for i in range(r, min(r+5, 501)):
-                    v = ws.Cells(i, 2).Value
-                    if v is None or str(v).strip() == "":
-                        empty_count += 1
-                    else:
-                        break
-                if empty_count >= 5:
-                    break
-        max_row = min(last_row + 2, 500)
-        print(f"扫描行数: 6 到 {max_row}（动态识别）")
-        sys.stdout.flush()
-        
-        rows_to_hide = []
-        modified_count = 0
-        SKIP_COLORS = {65280, 8421504, 12632256, 16777215}
-        red_cells = []
-        
-        for row in range(6, max_row + 1):
-            emp_cell = ws.Cells(row, 2)
-            emp_id = None
-            try:
-                if emp_cell.MergeCells:
-                    emp_id = emp_cell.MergeArea.Cells(1, 1).Value
+        return
+    print(f"识别到的日期列数: {len(date_cols)}")
+    sys.stdout.flush()
+
+    # 动态识别实际数据行数（B列员工编号）
+    last_row = 6
+    for r in range(6, 501):
+        val = ws.cell(row=r, column=2).value
+        if val is not None and str(val).strip() != "":
+            last_row = r
+        else:
+            empty_count = 0
+            for i in range(r, min(r+5, 501)):
+                v = ws.cell(row=i, column=2).value
+                if v is None or str(v).strip() == "":
+                    empty_count += 1
                 else:
-                    emp_id = emp_cell.Value
-            except:
-                emp_id = emp_cell.Value
-            
-            if not emp_id or str(emp_id).strip() == "":
+                    break
+            if empty_count >= 5:
+                break
+    max_row = min(last_row + 2, 500)
+    print(f"扫描行数: 6 到 {max_row}（动态识别）")
+    sys.stdout.flush()
+
+    rows_to_hide = []
+    modified_count = 0
+    SKIP_COLORS = {GREEN_RGB, GRAY_RGB, WHITE_RGB}
+    red_cells = []
+
+    # 遍历数据行
+    for row in range(6, max_row + 1):
+        # 获取员工ID
+        emp_cell = ws.cell(row=row, column=2)
+        emp_id = None
+        # 检查合并单元格
+        if emp_cell.coordinate in ws.merged_cells:
+            for merged_range in ws.merged_cells.ranges:
+                if emp_cell.coordinate in merged_range:
+                    emp_id = ws.cell(row=merged_range.min_row, column=merged_range.min_col).value
+                    break
+        else:
+            emp_id = emp_cell.value
+        if not emp_id or str(emp_id).strip() == "":
+            continue
+        emp_id = str(emp_id).strip()
+
+        # 职级判断
+        job_level = ws.cell(row=row, column=4).value
+        if job_level:
+            job_level_str = str(job_level).strip()
+            if any(level in job_level_str for level in HIDE_JOB_LEVELS):
+                rows_to_hide.append(row)
                 continue
-            emp_id = str(emp_id).strip()
-            
-            job_level = ws.Cells(row, 4).Value
-            if job_level:
-                job_level_str = str(job_level).strip()
-                if any(level in job_level_str for level in HIDE_JOB_LEVELS):
-                    rows_to_hide.append(row)
-                    continue
-            
-            emp_leave_records = []
-            for (eid, date), (leave_type, total_hours, start, end) in leaves.items():
-                if eid == emp_id:
-                    emp_leave_records.append((leave_type, total_hours, start, end))
-            unique_records = []
-            seen = set()
-            for rec in emp_leave_records:
-                key = (rec[1], rec[2], rec[3])
-                if key not in seen:
-                    seen.add(key)
-                    unique_records.append(rec)
-            
-            leave_assignment = {}
-            for leave_type, total_hours, start, end in unique_records:
-                workday_count = 0
+
+        # 休假分配（同原逻辑）
+        emp_leave_records = []
+        for (eid, date), (leave_type, total_hours, start, end) in leaves.items():
+            if eid == emp_id:
+                emp_leave_records.append((leave_type, total_hours, start, end))
+        unique_records = []
+        seen = set()
+        for rec in emp_leave_records:
+            key = (rec[1], rec[2], rec[3])
+            if key not in seen:
+                seen.add(key)
+                unique_records.append(rec)
+
+        leave_assignment = {}
+        for leave_type, total_hours, start, end in unique_records:
+            workday_count = 0
+            for col2, date2 in date_cols.items():
+                if start <= date2 <= end:
+                    cell = ws.cell(row=row, column=col2)
+                    fill = cell.fill
+                    color_hex = None
+                    if fill and isinstance(fill, PatternFill):
+                        fg = fill.fgColor
+                        if fg and fg.type == 'rgb':
+                            color_hex = fg.rgb[2:] if fg.rgb.startswith('FF') else fg.rgb
+                    if color_hex and color_hex not in SKIP_COLORS:
+                        workday_count += 1
+            if workday_count > 0:
+                daily_hours = total_hours / workday_count
                 for col2, date2 in date_cols.items():
                     if start <= date2 <= end:
-                        cell_color = ws.Cells(row, col2).Interior.Color
-                        if cell_color is not None:
-                            color_val = int(cell_color)
-                            if color_val not in SKIP_COLORS:
-                                workday_count += 1
-                        else:
-                            workday_count += 1
-                if workday_count > 0:
-                    daily_hours = total_hours / workday_count
-                    for col2, date2 in date_cols.items():
-                        if start <= date2 <= end:
-                            cell_color = ws.Cells(row, col2).Interior.Color
-                            if cell_color is not None:
-                                color_val = int(cell_color)
-                                if color_val not in SKIP_COLORS:
-                                    leave_assignment[(emp_id, date2)] = (leave_type, daily_hours)
-                            else:
-                                leave_assignment[(emp_id, date2)] = (leave_type, daily_hours)
-            
-            for col, date in date_cols.items():
-                cell = ws.Cells(row, col)
-                color_raw = cell.Interior.Color
-                if color_raw is None:
-                    continue
-                color = int(color_raw)
-                if color in SKIP_COLORS:
-                    continue
-                if color == 255:
-                    red_cells.append((row, col))
-                
-                has_remote = remote_dict and (emp_id, date) in remote_dict
-                remote_suffix = ""
+                        cell = ws.cell(row=row, column=col2)
+                        fill = cell.fill
+                        color_hex = None
+                        if fill and isinstance(fill, PatternFill):
+                            fg = fill.fgColor
+                            if fg and fg.type == 'rgb':
+                                color_hex = fg.rgb[2:] if fg.rgb.startswith('FF') else fg.rgb
+                        if color_hex and color_hex not in SKIP_COLORS:
+                            leave_assignment[(emp_id, date2)] = (leave_type, daily_hours)
+
+        # 遍历日期列
+        for col, date in date_cols.items():
+            cell = ws.cell(row=row, column=col)
+            fill = cell.fill
+            color_hex = None
+            if fill and isinstance(fill, PatternFill):
+                fg = fill.fgColor
+                if fg and fg.type == 'rgb':
+                    color_hex = fg.rgb[2:] if fg.rgb.startswith('FF') else fg.rgb
+            if not color_hex:
+                continue
+            if color_hex in SKIP_COLORS:
+                continue
+            if color_hex.lower() in ["ff0000", "0000ff"]:  # 红色
+                red_cells.append((row, col))
+
+            # 远程办公
+            has_remote = remote_dict and (emp_id, date) in remote_dict
+            remote_suffix = ""
+            if has_remote:
+                leave_type, location = remote_dict[(emp_id, date)]
+                if pd.isna(leave_type) or str(leave_type).strip() == "":
+                    leave_type = "远程工作"
+                remote_suffix = f" {leave_type}（{location}）"
+
+            if (emp_id, date) in leave_assignment:
+                leave_type, daily_hours = leave_assignment[(emp_id, date)]
+                text = f"{leave_type}{daily_hours:.1f}h"
+                if (emp_id, date) in checkins:
+                    cinfo = checkins[(emp_id, date)]
+                    times = []
+                    if cinfo["上班"]:
+                        times.append(f"上班{cinfo['上班']}")
+                    if cinfo["下班"]:
+                        times.append(f"下班{cinfo['下班']}")
+                    if cinfo["外出"]:
+                        times.extend([f"外出{t}" for t in cinfo["外出"]])
+                    if times:
+                        text += " " + " ".join(times)
                 if has_remote:
-                    leave_type, location = remote_dict[(emp_id, date)]
-                    if pd.isna(leave_type) or str(leave_type).strip() == "":
-                        leave_type = "远程工作"
-                    remote_suffix = f" {leave_type}（{location}）"
-                
-                if (emp_id, date) in leave_assignment:
-                    leave_type, daily_hours = leave_assignment[(emp_id, date)]
-                    text = f"{leave_type}{daily_hours}h"
-                    if (emp_id, date) in checkins:
-                        cinfo = checkins[(emp_id, date)]
-                        times = []
-                        if cinfo["上班"]:
-                            times.append(f"上班{cinfo['上班']}")
-                        if cinfo["下班"]:
-                            times.append(f"下班{cinfo['下班']}")
-                        if cinfo["外出"]:
-                            times.extend([f"外出{t}" for t in cinfo["外出"]])
-                        if times:
-                            text += " " + " ".join(times)
-                    if has_remote:
-                        text += remote_suffix
-                    cell.Value = text
-                    modified_count += 1
-                    continue
-                
-                text = generate_cell_text(emp_id, date, {}, checkins)
-                if text is not None:
-                    if has_remote:
-                        cell.Value = text + remote_suffix
-                    else:
-                        cell.Value = text
-                    modified_count += 1
-        
-        # 隐藏职级行
-        for row in rows_to_hide:
-            try:
-                ws.Rows(row).Hidden = True
-            except:
-                pass
-        
-        # 设置列宽
-        ws.Activate()
-        for col in date_cols.keys():
-            try:
-                ws.Columns(col).AutoFit()
-                ws.Columns(col).WrapText = True
-            except:
-                pass
-        
-        # 创建异常数据区（保留格式）
-        ws_new = wb.Worksheets.Add(After=wb.Worksheets(wb.Worksheets.Count))
-        ws_new.Name = "异常数据区"
-        
-        red_rows = set()
-        red_cols = set()
-        for (r, c) in red_cells:
-            red_rows.add(r)
-            red_cols.add(c)
-        
-        max_col = max(date_cols.keys()) if date_cols else 46
-        source_range = ws.Range(ws.Cells(1, 1), ws.Cells(max_row, max_col))
-        source_range.Copy(ws_new.Cells(1, 1))
-        
-        for row in range(6, max_row + 1):
-            for col in date_cols.keys():
-                cell = ws_new.Cells(row, col)
-                color_raw = cell.Interior.Color
-                if color_raw is not None and int(color_raw) == 255:
-                    continue
+                    text += remote_suffix
+                cell.value = text
+                modified_count += 1
+                continue
+
+            text = generate_cell_text(emp_id, date, {}, checkins)
+            if text is not None:
+                if has_remote:
+                    cell.value = text + remote_suffix
                 else:
-                    cell.ClearContents()
-        
-        rows_with_red = red_rows
-        rows_to_delete = []
+                    cell.value = text
+                modified_count += 1
+
+    # 隐藏职级行
+    for row in rows_to_hide:
+        ws.row_dimensions[row].hidden = True
+
+    # 设置列宽和自动换行
+    for col in date_cols.keys():
+        col_letter = get_column_letter(col)
+        ws.column_dimensions[col_letter].width = 12
         for row in range(6, max_row + 1):
-            if row not in rows_with_red:
-                rows_to_delete.append(row)
-        for row in sorted(rows_to_delete, reverse=True):
-            try:
-                ws_new.Rows(row).Delete()
-            except:
-                pass
-        
-        cols_with_red = red_cols
-        cols_to_delete = []
+            cell = ws.cell(row=row, column=col)
+            cell.alignment = Alignment(wrap_text=True)
+
+    # 创建异常数据区
+    wb.create_sheet("异常数据区")
+    ws_new = wb["异常数据区"]
+
+    # 复制所有单元格的值和样式
+    max_col = max(date_cols.keys()) if date_cols else 46
+    for r in range(1, max_row + 1):
+        for c in range(1, max_col + 1):
+            src = ws.cell(row=r, column=c)
+            dst = ws_new.cell(row=r, column=c)
+            dst.value = src.value
+            if src.has_style:
+                dst.font = src.font.copy()
+                dst.border = src.border.copy()
+                dst.fill = src.fill.copy()
+                dst.number_format = src.number_format
+                dst.protection = src.protection.copy()
+                dst.alignment = src.alignment.copy()
+
+    # 清除非红色单元格的内容
+    for row in range(6, max_row + 1):
         for col in date_cols.keys():
-            if col not in cols_with_red:
-                cols_to_delete.append(col)
-        for col in sorted(cols_to_delete, reverse=True):
-            try:
-                ws_new.Columns(col).Delete()
-            except:
-                pass
-        
-        # 保存工作簿
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        wb.SaveAs(str(output_file))
-        
-        print(f"已生成考勤明细: {output_file}")
-        print(f"隐藏职级行数: {len(rows_to_hide)}")
-        print(f"实际修改单元格数: {modified_count}")
-        print(f"异常数据区行数: {len(red_rows)} 行, 列数: {len(red_cols)} 列")
-        sys.stdout.flush()
-        
-    except Exception as e:
-        print(f"处理模板时出错: {e}")
-        sys.stdout.flush()
-        raise
-    finally:
-        if wb:
-            try:
-                wb.Close(SaveChanges=False)
-            except:
-                pass
-        try:
-            excel.Quit()
-        except:
-            pass
-        import gc
-        gc.collect()
+            cell = ws_new.cell(row=row, column=col)
+            fill = cell.fill
+            color_hex = None
+            if fill and isinstance(fill, PatternFill):
+                fg = fill.fgColor
+                if fg and fg.type == 'rgb':
+                    color_hex = fg.rgb[2:] if fg.rgb.startswith('FF') else fg.rgb
+            if color_hex and color_hex.lower() in ["ff0000", "0000ff"]:
+                continue
+            else:
+                cell.value = None
+
+    # 删除没有红色数据的行（保留前5行表头）
+    red_rows = set()
+    red_cols = set()
+    for (r, c) in red_cells:
+        red_rows.add(r)
+        red_cols.add(c)
+
+    for row in range(max_row, 5, -1):
+        if row not in red_rows:
+            ws_new.delete_rows(row)
+
+    for col in range(max_col, 15, -1):
+        if col not in red_cols:
+            ws_new.delete_cols(col)
+
+    # 保存
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(str(output_file))
+
+    print(f"已生成考勤明细: {output_file}")
+    print(f"隐藏职级行数: {len(rows_to_hide)}")
+    print(f"实际修改单元格数: {modified_count}")
+    print(f"异常数据区行数: {len(red_rows)} 行, 列数: {len(red_cols)} 列")
+    sys.stdout.flush()
+
 
 def run_attendance_check(start_date, end_date, department, template_file, checkin_file, leave_file, remote_file=None):
     print("正在读取休假数据...")
@@ -463,21 +443,19 @@ def run_attendance_check(start_date, end_date, department, template_file, checki
         sys.stdout.flush()
     print("正在处理考勤模板...")
     sys.stdout.flush()
-    
+
     base_dir = Path(__file__).parent
     output_dir = base_dir / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     start = datetime.strptime(start_date, "%Y-%m-%d")
     end = datetime.strptime(end_date, "%Y-%m-%d")
-    
     start_str = f"{start.year}.{start.month}.{start.day}"
     end_str = f"{end.year}.{end.month}.{end.day}"
-    
     filename = f"{department}考勤（{start_str}-{end_str}）.xlsx"
     output_file = output_dir / filename
-    
-    process_template_win32com(template_file, leaves, checkins, remote_dict, output_file)
+
+    process_template_openpyxl(template_file, leaves, checkins, remote_dict, output_file)
     print("处理完成")
     sys.stdout.flush()
 
