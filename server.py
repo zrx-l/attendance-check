@@ -27,10 +27,15 @@ app.add_middleware(
 )
 
 # ===== 目录配置 =====
-BASE_DIR = Path(__file__).parent
+import os
+if os.getenv("RENDER"):
+    BASE_DIR = Path("/tmp")
+else:
+    BASE_DIR = Path(__file__).parent
+
 TEMP_DIR = BASE_DIR / "temp_uploads"
-TEMP_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR = BASE_DIR / "output"
+TEMP_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 HTML_DIR = BASE_DIR / "web"
 HTML_DIR.mkdir(exist_ok=True)
@@ -47,7 +52,7 @@ def _log(task_id: str, message: str):
 
 
 def _run_task_async(task_id: str, start_date: str, end_date: str, department: str,
-                    template_path: Path, checkin_path: Path, leave_path: Path, remote_path: Path | None):
+                    template_path: Path, checkin_path: Path, leave_path: Path | None, remote_path: Path | None):
     """后台线程执行核对任务"""
     try:
         tasks[task_id]["status"] = "running"
@@ -61,10 +66,11 @@ def _run_task_async(task_id: str, start_date: str, end_date: str, department: st
             "--dept", department,
             "--template", str(template_path),
             "--checkin", str(checkin_path),
-            "--leave", str(leave_path)
         ]
+        if leave_path:
+            cmd.extend(["--leave", str(leave_path)])
         if remote_path:
-             cmd.extend(["--remote", str(remote_path)])
+            cmd.extend(["--remote", str(remote_path)])
 
         _log(task_id, f"执行核对脚本: check_attendance_manual.py --start {start_date} --end {end_date} --dept {department}")
         
@@ -84,12 +90,14 @@ def _run_task_async(task_id: str, start_date: str, end_date: str, department: st
                 _log(task_id, line)
 
         process.wait()
-        for p in [template_path, checkin_path, leave_path]:
+        # 清理临时文件
+        for p in [template_path, checkin_path]:
             if p.exists():
-                 p.unlink()
+                p.unlink()
+        if leave_path and leave_path.exists():
+            leave_path.unlink()
         if remote_path and remote_path.exists():
             remote_path.unlink()
-        
 
         if process.returncode != 0:
             _log(task_id, f"脚本执行失败，退出码: {process.returncode}")
@@ -157,10 +165,10 @@ async def upload_and_check(
     department: str = Form(default="工程造价一部"),
     template: UploadFile = File(...),
     checkin: UploadFile = File(...),
-    leave: UploadFile = File(...),
+    leave: UploadFile | None = File(None),   # 改为可选
     remote: UploadFile | None = File(None)
 ):
-    """上传四个源文件并启动后台核对任务"""
+    """上传文件并启动后台核对任务（休假和远程为可选）"""
     try:
         datetime.strptime(start_date, "%Y-%m-%d")
         datetime.strptime(end_date, "%Y-%m-%d")
@@ -172,7 +180,7 @@ async def upload_and_check(
 
     template_path = TEMP_DIR / f"template_{date_prefix}_{task_id}.xlsx"
     checkin_path = TEMP_DIR / f"checkin_{date_prefix}_{task_id}.xlsx"
-    leave_path = TEMP_DIR / f"leave_{date_prefix}_{task_id}.xls"
+    leave_path = None
     remote_path = None
 
     try:
@@ -182,9 +190,11 @@ async def upload_and_check(
         # 保存打卡日报
         with open(checkin_path, "wb") as f:
             shutil.copyfileobj(checkin.file, f)
-        # 保存休假申请
-        with open(leave_path, "wb") as f:
-            shutil.copyfileobj(leave.file, f)
+        # 保存休假申请（可选）
+        if leave:
+            leave_path = TEMP_DIR / f"leave_{date_prefix}_{task_id}.xls"
+            with open(leave_path, "wb") as f:
+                shutil.copyfileobj(leave.file, f)
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": f"保存文件失败: {str(e)}"})
 
@@ -216,6 +226,7 @@ async def upload_and_check(
     thread.start()
 
     return {"task_id": task_id, "status": "pending"}
+
 
 @app.get("/task/{task_id}")
 async def get_task_status(task_id: str):
