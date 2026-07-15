@@ -1,6 +1,5 @@
 import sys
 import io
-# 强制行缓冲，确保所有 print 实时输出
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', line_buffering=True)
 
 import pandas as pd
@@ -11,14 +10,13 @@ import argparse
 import openpyxl
 from openpyxl.styles import PatternFill, Alignment
 from openpyxl.utils import get_column_letter
-from openpyxl.styles.colors import COLOR_INDEX  # 新增：用于索引颜色映射
+from openpyxl.styles.colors import COLOR_INDEX
 
 # ================== 颜色常量 ==================
 GREEN_RGB = "00FF00"
 GRAY_RGB = "808080"
 WHITE_RGB = "FFFFFF"
 
-# ================== 打卡日报列映射 ==================
 CHECKIN_SHEET = 1
 CHECKIN_COL_DATE = 0
 CHECKIN_COL_ACCOUNT = 2
@@ -173,12 +171,10 @@ def generate_cell_text(emp_id, date, leaves, checkins):
     return "缺卡2次"
 
 def get_cell_color(cell):
-    """安全获取单元格背景色，返回六位十六进制颜色字符串（如 'FF0000'），失败返回 None"""
     fill = cell.fill
     if fill and isinstance(fill, PatternFill):
         fg = fill.fgColor
         if fg:
-            # 处理 RGB 类型
             if fg.type == 'rgb':
                 rgb = fg.rgb
                 if isinstance(rgb, str):
@@ -186,7 +182,6 @@ def get_cell_color(cell):
                         return rgb[2:].upper()
                     else:
                         return rgb.upper()
-            # 处理索引颜色
             elif fg.type == 'indexed':
                 color = COLOR_INDEX.get(fg.indexed)
                 if color:
@@ -197,11 +192,9 @@ def get_cell_color(cell):
     return None
 
 def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file):
-    # 打开模板
     wb = openpyxl.load_workbook(template_path, data_only=True)
     ws = wb["报表区"]
 
-    # 识别日期列
     date_row = 4
     first_date_col = 16
     date_cols = {}
@@ -229,7 +222,6 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     print(f"识别到的日期列数: {len(date_cols)}")
     sys.stdout.flush()
 
-    # 动态识别实际数据行数（B列员工编号）
     last_row = 6
     for r in range(6, 501):
         val = ws.cell(row=r, column=2).value
@@ -251,15 +243,12 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
 
     rows_to_hide = []
     modified_count = 0
-    SKIP_COLORS = {GREEN_RGB, GRAY_RGB, WHITE_RGB}
+    SKIP_COLORS = {"00FF00", "808080", "FFFFFF", "000000", "F0F0F0"}
     red_cells = []
 
-    # 遍历数据行
     for row in range(6, max_row + 1):
-        # 获取员工ID
         emp_cell = ws.cell(row=row, column=2)
         emp_id = None
-        # 检查合并单元格
         if emp_cell.coordinate in ws.merged_cells:
             for merged_range in ws.merged_cells.ranges:
                 if emp_cell.coordinate in merged_range:
@@ -271,7 +260,6 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             continue
         emp_id = str(emp_id).strip()
 
-        # 职级判断
         job_level = ws.cell(row=row, column=4).value
         if job_level:
             job_level_str = str(job_level).strip()
@@ -279,7 +267,6 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                 rows_to_hide.append(row)
                 continue
 
-        # 休假分配（同原逻辑）
         emp_leave_records = []
         for (eid, date), (leave_type, total_hours, start, end) in leaves.items():
             if eid == emp_id:
@@ -308,18 +295,14 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                         if color_hex and color_hex not in SKIP_COLORS:
                             leave_assignment[(emp_id, date2)] = (leave_type, daily_hours)
 
-        # 遍历日期列
         for col, date in date_cols.items():
             cell = ws.cell(row=row, column=col)
             color_hex = get_cell_color(cell)
-            if not color_hex:
+            if not color_hex or color_hex in SKIP_COLORS:
                 continue
-            if color_hex in SKIP_COLORS:
-                continue
-            if color_hex.lower() in ["ff0000", "0000ff"]:  # 红色
+            if color_hex in ("FF0000", "0000FF"):
                 red_cells.append((row, col))
 
-            # 远程办公
             has_remote = remote_dict and (emp_id, date) in remote_dict
             remote_suffix = ""
             if has_remote:
@@ -356,11 +339,9 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                     cell.value = text
                 modified_count += 1
 
-    # 隐藏职级行
     for row in rows_to_hide:
         ws.row_dimensions[row].hidden = True
 
-    # 设置列宽和自动换行
     for col in date_cols.keys():
         col_letter = get_column_letter(col)
         ws.column_dimensions[col_letter].width = 12
@@ -368,11 +349,9 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             cell = ws.cell(row=row, column=col)
             cell.alignment = Alignment(wrap_text=True)
 
-    # 创建异常数据区
     wb.create_sheet("异常数据区")
     ws_new = wb["异常数据区"]
 
-    # 复制所有单元格的值和样式
     max_col = max(date_cols.keys()) if date_cols else 46
     for r in range(1, max_row + 1):
         for c in range(1, max_col + 1):
@@ -380,7 +359,6 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             dst = ws_new.cell(row=r, column=c)
             dst.value = src.value
             if src.has_style:
-                # 使用 openpyxl 的 copy 方法，避免 deprecation warning
                 dst.font = src.font.copy()
                 dst.border = src.border.copy()
                 dst.fill = src.fill.copy()
@@ -388,17 +366,15 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                 dst.protection = src.protection.copy()
                 dst.alignment = src.alignment.copy()
 
-    # 清除非红色单元格的内容
     for row in range(6, max_row + 1):
         for col in date_cols.keys():
             cell = ws_new.cell(row=row, column=col)
             color_hex = get_cell_color(cell)
-            if color_hex and color_hex.lower() in ["ff0000", "0000ff"]:
+            if color_hex and color_hex in ("FF0000", "0000FF"):
                 continue
             else:
                 cell.value = None
 
-    # 删除没有红色数据的行（保留前5行表头）
     red_rows = set()
     red_cols = set()
     for (r, c) in red_cells:
@@ -413,7 +389,6 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
         if col not in red_cols:
             ws_new.delete_cols(col)
 
-    # 保存
     output_file.parent.mkdir(parents=True, exist_ok=True)
     wb.save(str(output_file))
 
