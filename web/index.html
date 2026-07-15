@@ -56,7 +56,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC'
 .btn-start:hover{background:linear-gradient(135deg,#1454A0,#1A4FB4);box-shadow:0 4px 12px rgba(26,95,180,.35);transform:translateY(-1px)}
 .btn-start:disabled{opacity:.5;cursor:not-allowed;transform:none}
 
-/* ===== UPLOAD CARDS (简洁紧凑风格，参考旧版) ===== */
+/* ===== UPLOAD CARDS ===== */
 .upload-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:22px}
 .upload-card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm);transition:box-shadow .2s,transform .2s;padding:24px 18px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px;min-height:180px;justify-content:center}
 .upload-card:hover{box-shadow:var(--shadow);transform:translateY(-2px)}
@@ -74,7 +74,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC'
 .upload-area-hint{font-size:12px;color:var(--gray)}
 .upload-area.filled .upload-area-hint{color:var(--green);font-weight:600;font-size:12px}
 
-/* ===== PROGRESS BAR AREA (替代KPI卡片) ===== */
+/* ===== PROGRESS BAR AREA ===== */
 .progress-area{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:18px 22px;margin-bottom:22px;box-shadow:var(--shadow-sm)}
 .progress-area-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 .progress-area-label{font-size:12px;font-weight:600;color:var(--gray)}
@@ -163,7 +163,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC'
 <!-- MAIN -->
 <div class="main">
 
-  <!-- 查询条件（保留不动） -->
+  <!-- 查询条件 -->
   <div class="section-title">查询条件</div>
   <div class="filter-bar">
     <div class="filter-group">
@@ -194,7 +194,7 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC'
     <button class="btn-start" id="btnStart" disabled>开始核对</button>
   </div>
 
-  <!-- 数据源上传（简洁紧凑风格） -->
+  <!-- 数据源上传 -->
   <div class="section-title">上传数据源</div>
   <div class="upload-grid">
 
@@ -222,11 +222,11 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC'
       </div>
     </div>
 
-    <!-- 休假申请 -->
+    <!-- 休假申请（可选） -->
     <div class="upload-card">
       <div class="upload-card-icon green">&#127968;</div>
       <div class="upload-card-title">休假申请</div>
-      <div class="upload-card-sub">leavareq.xls</div>
+      <div class="upload-card-sub">leavareq.xls（可选）</div>
       <div class="upload-area" id="area3">
         <span class="upload-area-symbol">+</span>
         <span class="upload-area-hint">点击或拖拽上传</span>
@@ -246,14 +246,14 @@ html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC'
     </div>
   </div>
 
-  <!-- 进度条区域（替代KPI卡片） -->
+  <!-- 进度条区域 -->
   <div class="progress-area">
     <div class="progress-area-header">
       <span class="progress-area-label">准备状态</span>
       <div class="progress-area-stats">
         <span class="progress-stat">期间: <b id="pPeriod">--</b></span>
         <span class="progress-stat">部门: <b id="pDept">--</b></span>
-        <span class="progress-stat">文件: <b id="pFiles">0/3</b></span>
+        <span class="progress-stat">文件: <b id="pFiles">0/4</b></span>
         <span class="progress-stat" id="pPctWrap"><b id="pPct">0%</b></span>
       </div>
     </div>
@@ -413,7 +413,8 @@ function setStep(i, active) {
 }
 
 function updateStartBtn() {
-  const all = uploadedFiles.template && uploadedFiles.checkin && uploadedFiles.leave;
+  // 只有模板和打卡是必须的，休假变为可选
+  const all = uploadedFiles.template && uploadedFiles.checkin;
   const online = document.getElementById('statusBadge').classList.contains('online');
   document.getElementById('btnStart').disabled = !(all && online);
 }
@@ -442,7 +443,10 @@ async function startCheck() {
   fd.append('department', document.getElementById('department').value);
   fd.append('template', uploadedFiles.template);
   fd.append('checkin', uploadedFiles.checkin);
-  fd.append('leave', uploadedFiles.leave);
+  // 只有上传了休假才添加（可选）
+  if (uploadedFiles.leave) {
+    fd.append('leave', uploadedFiles.leave);
+  }
   if (uploadedFiles.remote) {
     fd.append('remote', uploadedFiles.remote);
   }
