@@ -171,24 +171,49 @@ def generate_cell_text(emp_id, date, leaves, checkins):
     return "缺卡2次"
 
 def get_cell_color(cell):
+    """增强版：尝试多种方式获取颜色，返回十六进制字符串"""
     fill = cell.fill
     if fill and isinstance(fill, PatternFill):
+        # 尝试 fgColor
         fg = fill.fgColor
         if fg:
-            if fg.type == 'rgb':
+            # 尝试 rgb 属性（有时 type 不是 rgb 但 rgb 有值）
+            if hasattr(fg, 'rgb') and fg.rgb:
                 rgb = fg.rgb
                 if isinstance(rgb, str):
                     if rgb.startswith('FF'):
                         return rgb[2:].upper()
                     else:
                         return rgb.upper()
-            elif fg.type == 'indexed':
+            # 索引颜色
+            if fg.type == 'indexed':
                 color = COLOR_INDEX.get(fg.indexed)
                 if color:
                     if color.startswith('FF'):
                         return color[2:].upper()
                     else:
                         return color.upper()
+            # 主题颜色 (简单处理：主题索引 2 为红色)
+            if fg.type == 'theme':
+                # 主题颜色索引对应关系（常用）
+                theme_colors = {
+                    0: "000000",  # 深色1
+                    1: "FFFFFF",  # 浅色1
+                    2: "FF0000",  # 强调文字颜色1 (红色)
+                    3: "00FF00",  # 强调文字颜色2 (绿色)
+                    4: "0000FF",  # 强调文字颜色3 (蓝色)
+                }
+                if fg.theme in theme_colors:
+                    return theme_colors[fg.theme]
+        # 如果 fgColor 不行，尝试 bgColor
+        bg = fill.bgColor
+        if bg and hasattr(bg, 'rgb') and bg.rgb:
+            rgb = bg.rgb
+            if isinstance(rgb, str):
+                if rgb.startswith('FF'):
+                    return rgb[2:].upper()
+                else:
+                    return rgb.upper()
     return None
 
 def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file):
@@ -243,8 +268,9 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
 
     rows_to_hide = []
     modified_count = 0
+    # 跳过颜色：绿色、灰色、白色、黑色、浅灰色（可能还有其他，但都跳过）
     SKIP_COLORS = {"00FF00", "808080", "FFFFFF", "000000", "F0F0F0"}
-    red_cells = []
+    red_cells = []  # 存储所有非跳过颜色的单元格 (row, col)
 
     for row in range(6, max_row + 1):
         emp_cell = ws.cell(row=row, column=2)
@@ -300,8 +326,8 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             color_hex = get_cell_color(cell)
             if not color_hex or color_hex in SKIP_COLORS:
                 continue
-            if color_hex in ("FF0000", "0000FF"):
-                red_cells.append((row, col))
+            # 所有非跳过颜色均视为红色（用于异常数据区）
+            red_cells.append((row, col))
 
             has_remote = remote_dict and (emp_id, date) in remote_dict
             remote_suffix = ""
@@ -353,6 +379,7 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     ws_new = wb["异常数据区"]
 
     max_col = max(date_cols.keys()) if date_cols else 46
+    # 复制全部内容
     for r in range(1, max_row + 1):
         for c in range(1, max_col + 1):
             src = ws.cell(row=r, column=c)
@@ -366,25 +393,22 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                 dst.protection = src.protection.copy()
                 dst.alignment = src.alignment.copy()
 
-    for row in range(6, max_row + 1):
-        for col in date_cols.keys():
-            cell = ws_new.cell(row=row, column=col)
-            color_hex = get_cell_color(cell)
-            if color_hex and color_hex in ("FF0000", "0000FF"):
-                continue
-            else:
-                cell.value = None
-
+    # 清除非红色（即非跳过颜色）单元格的内容
     red_rows = set()
     red_cols = set()
     for (r, c) in red_cells:
         red_rows.add(r)
         red_cols.add(c)
 
+    for row in range(6, max_row + 1):
+        for col in date_cols.keys():
+            if (row, col) not in red_cells:
+                ws_new.cell(row=row, column=col).value = None
+
+    # 删除没有红色数据的行和列
     for row in range(max_row, 5, -1):
         if row not in red_rows:
             ws_new.delete_rows(row)
-
     for col in range(max_col, 15, -1):
         if col not in red_cols:
             ws_new.delete_cols(col)
