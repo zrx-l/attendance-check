@@ -154,8 +154,7 @@ def format_hours(cinfo):
 
 
 def generate_cell_text(emp_id, date, leaves, checkins):
-    """生成单元格文本，并追加总工时（如果有上下班打卡）"""
-    # 休假情况
+    # 原版逻辑，只增加了 format_hours 调用
     if (emp_id, date) in leaves:
         leave_type, hours = leaves[(emp_id, date)]
         text = f"{leave_type}{hours}h"
@@ -173,7 +172,6 @@ def generate_cell_text(emp_id, date, leaves, checkins):
             text += format_hours(cinfo)
         return text
 
-    # 非休假情况
     if (emp_id, date) in checkins:
         cinfo = checkins[(emp_id, date)]
         has_上班 = bool(cinfo["上班"])
@@ -205,7 +203,7 @@ def generate_cell_text(emp_id, date, leaves, checkins):
 
 
 def get_cell_color(cell):
-    """与您成功版本完全一致，未改动"""
+    # 与成功版本完全一致，未改动
     fill = cell.fill
     if fill and isinstance(fill, PatternFill):
         fg = fill.fgColor
@@ -246,7 +244,7 @@ def get_cell_color(cell):
 
 
 def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file):
-    # 与您成功版本完全一致，只是新增了 format_hours 调用，其余不变
+    # 与成功版本完全一致，只在休假分支增加了 format_hours 调用
     wb = openpyxl.load_workbook(template_path, data_only=True)
     ws = wb["报表区"]
 
@@ -299,7 +297,7 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     rows_to_hide = []
     modified_count = 0
     SKIP_COLORS = {"00FF00", "808080", "FFFFFF", "000000", "F0F0F0"}
-    red_cells = []  # 所有非跳过颜色（符合您原有逻辑）
+    red_cells = []
 
     for row in range(6, max_row + 1):
         emp_cell = ws.cell(row=row, column=2)
@@ -359,7 +357,6 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                 skip = True
 
             if not skip:
-                # 记录为非跳过色（异常数据区使用）
                 red_cells.append((row, col))
 
                 has_remote = remote_dict and (emp_id, date) in remote_dict
