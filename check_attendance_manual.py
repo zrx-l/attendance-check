@@ -27,7 +27,6 @@ CHECKIN_COL_STATUS = 9
 HIDE_JOB_LEVELS = ["总监（业务）", "高级经理（业务）", "经理（业务）", "副经理（业务）"]
 
 
-# ---------- 以下函数与您成功版本完全相同 ----------
 def parse_leave_data(file_path):
     df = pd.read_excel(file_path, header=0, skiprows=[1], dtype=str)
     df.columns = df.columns.str.strip()
@@ -343,30 +342,27 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             for col2, date2 in date_cols.items():
                 if start <= date2 <= end:
                     color_hex = get_cell_color(ws.cell(row=row, column=col2))
-                    if color_hex is None or color_hex not in SKIP_COLORS:
+                    if color_hex is not None and color_hex not in SKIP_COLORS:
                         workday_count += 1
             if workday_count > 0:
                 daily_hours = total_hours / workday_count
                 for col2, date2 in date_cols.items():
                     if start <= date2 <= end:
                         color_hex = get_cell_color(ws.cell(row=row, column=col2))
-                        if color_hex is None or color_hex not in SKIP_COLORS:
+                        if color_hex is not None and color_hex not in SKIP_COLORS:
                             leave_assignment[(emp_id, date2)] = (leave_type, daily_hours)
 
         for col, date in date_cols.items():
             cell = ws.cell(row=row, column=col)
             color_hex = get_cell_color(cell)
 
-            skip = False
-            if color_hex is not None and color_hex in SKIP_COLORS:
-                skip = True
-
-            if not skip:
-                # 记录真正红色的单元格（即颜色为 FF0000 或 0000FF）
-                if color_hex is not None and color_hex in ("FF0000", "0000FF"):
+            # 只有颜色读取成功且不是跳过色，才填充数据
+            if color_hex is not None and color_hex not in SKIP_COLORS:
+                # 记录真正红色的单元格（用于异常数据区）
+                if color_hex in ("FF0000", "0000FF"):
                     red_cells.append((row, col))
 
-                # 填充数据（所有非跳过色）
+                # 填充数据
                 has_remote = remote_dict and (emp_id, date) in remote_dict
                 remote_suffix = ""
                 if has_remote:
