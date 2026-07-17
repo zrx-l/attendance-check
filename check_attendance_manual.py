@@ -295,7 +295,7 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     rows_to_hide = []
     modified_count = 0
     SKIP_COLORS = {"00FF00", "808080", "FFFFFF", "000000", "F0F0F0"}
-    red_cells = []
+    red_cells = []  # 存储所有非跳过颜色的单元格 (row, col)
 
     for row in range(6, max_row + 1):
         emp_cell = ws.cell(row=row, column=2)
@@ -336,62 +336,62 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             for col2, date2 in date_cols.items():
                 if start <= date2 <= end:
                     color_hex = get_cell_color(ws.cell(row=row, column=col2))
-                    if color_hex is None or color_hex not in SKIP_COLORS:
+                    if color_hex is not None and color_hex not in SKIP_COLORS:
                         workday_count += 1
             if workday_count > 0:
                 daily_hours = total_hours / workday_count
                 for col2, date2 in date_cols.items():
                     if start <= date2 <= end:
                         color_hex = get_cell_color(ws.cell(row=row, column=col2))
-                        if color_hex is None or color_hex not in SKIP_COLORS:
+                        if color_hex is not None and color_hex not in SKIP_COLORS:
                             leave_assignment[(emp_id, date2)] = (leave_type, daily_hours)
 
         for col, date in date_cols.items():
             cell = ws.cell(row=row, column=col)
             color_hex = get_cell_color(cell)
 
-            skip = False
-            if color_hex is not None and color_hex in SKIP_COLORS:
-                skip = True
+            # 关键修改：只有颜色存在且不是跳过色才填充，None 和跳过色都跳过
+            if color_hex is None or color_hex in SKIP_COLORS:
+                continue
 
-            if not skip:
-                red_cells.append((row, col))
+            # 记录所有非跳过色（用于异常数据区）
+            red_cells.append((row, col))
 
-                has_remote = remote_dict and (emp_id, date) in remote_dict
-                remote_suffix = ""
+            has_remote = remote_dict and (emp_id, date) in remote_dict
+            remote_suffix = ""
+            if has_remote:
+                leave_type, location = remote_dict[(emp_id, date)]
+                if pd.isna(leave_type) or str(leave_type).strip() == "":
+                    leave_type = "远程工作"
+                remote_suffix = f" {leave_type}（{location}）"
+
+            if (emp_id, date) in leave_assignment:
+                leave_type, daily_hours = leave_assignment[(emp_id, date)]
+                text = f"{leave_type}{daily_hours:.1f}h"
+                if (emp_id, date) in checkins:
+                    cinfo = checkins[(emp_id, date)]
+                    times = []
+                    if cinfo["上班"]:
+                        times.append(f"上班{cinfo['上班']}")
+                    if cinfo["下班"]:
+                        times.append(f"下班{cinfo['下班']}")
+                    if cinfo["外出"]:
+                        times.extend([f"外出{t}" for t in cinfo["外出"]])
+                    if times:
+                        text += " " + " ".join(times)
                 if has_remote:
-                    leave_type, location = remote_dict[(emp_id, date)]
-                    if pd.isna(leave_type) or str(leave_type).strip() == "":
-                        leave_type = "远程工作"
-                    remote_suffix = f" {leave_type}（{location}）"
+                    text += remote_suffix
+                cell.value = text
+                modified_count += 1
+                continue
 
-                if (emp_id, date) in leave_assignment:
-                    leave_type, daily_hours = leave_assignment[(emp_id, date)]
-                    text = f"{leave_type}{daily_hours:.1f}h"
-                    if (emp_id, date) in checkins:
-                        cinfo = checkins[(emp_id, date)]
-                        times = []
-                        if cinfo["上班"]:
-                            times.append(f"上班{cinfo['上班']}")
-                        if cinfo["下班"]:
-                            times.append(f"下班{cinfo['下班']}")
-                        if cinfo["外出"]:
-                            times.extend([f"外出{t}" for t in cinfo["外出"]])
-                        if times:
-                            text += " " + " ".join(times)
-                    if has_remote:
-                        text += remote_suffix
+            text = generate_cell_text(emp_id, date, {}, checkins)
+            if text is not None:
+                if has_remote:
+                    cell.value = text + remote_suffix
+                else:
                     cell.value = text
-                    modified_count += 1
-                    continue
-
-                text = generate_cell_text(emp_id, date, {}, checkins)
-                if text is not None:
-                    if has_remote:
-                        cell.value = text + remote_suffix
-                    else:
-                        cell.value = text
-                    modified_count += 1
+                modified_count += 1
 
     for row in rows_to_hide:
         ws.row_dimensions[row].hidden = True
