@@ -27,6 +27,7 @@ CHECKIN_COL_STATUS = 9
 HIDE_JOB_LEVELS = ["总监（业务）", "高级经理（业务）", "经理（业务）", "副经理（业务）"]
 
 
+# ---------- 以下函数与您成功版本完全相同 ----------
 def parse_leave_data(file_path):
     df = pd.read_excel(file_path, header=0, skiprows=[1], dtype=str)
     df.columns = df.columns.str.strip()
@@ -135,6 +136,7 @@ def get_date_from_cell_value(cell_value):
     return None
 
 
+# ================== 新增：工时计算函数 ==================
 def format_hours(cinfo):
     """计算工时，返回格式化的字符串，如 ' (9.0h)'，如果无上下班则返回空"""
     has_上班 = bool(cinfo.get("上班"))
@@ -153,8 +155,9 @@ def format_hours(cinfo):
     return ""
 
 
+# ================== 修改：generate_cell_text 追加总工时 ==================
 def generate_cell_text(emp_id, date, leaves, checkins):
-    # 原版逻辑，只增加了 format_hours 调用
+    """生成单元格文本，并追加总工时（如果有上下班打卡）"""
     if (emp_id, date) in leaves:
         leave_type, hours = leaves[(emp_id, date)]
         text = f"{leave_type}{hours}h"
@@ -169,6 +172,7 @@ def generate_cell_text(emp_id, date, leaves, checkins):
                 times.extend([f"外出{t}" for t in cinfo["外出"]])
             if times:
                 text += " " + " ".join(times)
+            # 追加总工时
             text += format_hours(cinfo)
         return text
 
@@ -196,14 +200,15 @@ def generate_cell_text(emp_id, date, leaves, checkins):
         if has_外出:
             parts.extend([f"外出{t}" for t in cinfo["外出"]])
         text = " ".join(parts)
+        # 追加总工时
         text += format_hours(cinfo)
         return text
 
     return "缺卡2次"
 
 
+# ================== get_cell_color 与您成功版本完全一致 ==================
 def get_cell_color(cell):
-    # 与成功版本完全一致，未改动
     fill = cell.fill
     if fill and isinstance(fill, PatternFill):
         fg = fill.fgColor
@@ -243,8 +248,8 @@ def get_cell_color(cell):
     return None
 
 
+# ================== process_template_openpyxl 与您成功版本完全一致 ==================
 def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file):
-    # 与成功版本完全一致，只在休假分支增加了 format_hours 调用
     wb = openpyxl.load_workbook(template_path, data_only=True)
     ws = wb["报表区"]
 
@@ -381,8 +386,6 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                             times.extend([f"外出{t}" for t in cinfo["外出"]])
                         if times:
                             text += " " + " ".join(times)
-                        # 新增：追加工时
-                        text += format_hours(cinfo)
                     if has_remote:
                         text += remote_suffix
                     cell.value = text
@@ -407,6 +410,7 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             cell = ws.cell(row=row, column=col)
             cell.alignment = Alignment(wrap_text=True)
 
+    # ================== 重要：异常数据区在报表区数据填充完成后创建 ==================
     wb.create_sheet("异常数据区")
     ws_new = wb["异常数据区"]
 
@@ -452,6 +456,7 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     sys.stdout.flush()
 
 
+# ================== 修改：run_attendance_check 使 leave_file 可选 ==================
 def run_attendance_check(start_date, end_date, department, template_file, checkin_file, leave_file=None, remote_file=None):
     print("正在读取休假数据...")
     sys.stdout.flush()
