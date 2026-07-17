@@ -244,7 +244,7 @@ def get_cell_color(cell):
     return None
 
 
-# ================== process_template_openpyxl（核心，已修正顺序） ==================
+# ================== process_template_openpyxl ==================
 def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file):
     wb = openpyxl.load_workbook(template_path, data_only=True)
     ws = wb["报表区"]
@@ -300,7 +300,7 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     rows_to_hide = []
     modified_count = 0
     SKIP_COLORS = {"00FF00", "808080", "FFFFFF", "000000", "F0F0F0"}
-    red_cells = []
+    red_cells = []  # 只记录真正红色的单元格
 
     # ===== 第1步：填充报表区数据，并记录红色单元格 =====
     for row in range(6, max_row + 1):
@@ -362,8 +362,11 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                 skip = True
 
             if not skip:
-                red_cells.append((row, col))   # 记录红色（非跳过色）
+                # 记录真正红色的单元格（即颜色为 FF0000 或 0000FF）
+                if color_hex is not None and color_hex in ("FF0000", "0000FF"):
+                    red_cells.append((row, col))
 
+                # 填充数据（所有非跳过色）
                 has_remote = remote_dict and (emp_id, date) in remote_dict
                 remote_suffix = ""
                 if has_remote:
@@ -453,17 +456,11 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             ws_new.delete_cols(col)
 
     # ===== 第4步：将异常数据区移动到报表区之前（即索引 1） =====
-    # openpyxl 中移动工作表：先获取所有工作表列表，重新排序
     sheets = wb._sheets
-    # 找到异常数据区和报表区的索引
     idx_异常 = sheets.index(ws_new)
     idx_报表 = sheets.index(ws)
-    # 将异常数据区移到报表区之前（如果异常在报表后面，则向前移动）
     if idx_异常 > idx_报表:
-        # 将 ws_new 移动到 idx_报表 位置
         sheets.insert(idx_报表, sheets.pop(idx_异常))
-        # 调整索引
-        # 实际上移动后，顺序就对了
 
     # 保存
     output_file.parent.mkdir(parents=True, exist_ok=True)
