@@ -168,7 +168,6 @@ def generate_cell_text(emp_id, date, leaves, checkins):
                 times.extend([f"外出{t}" for t in cinfo["外出"]])
             if times:
                 text += " " + " ".join(times)
-            # 追加总工时
             text += format_hours(cinfo)
         return text
 
@@ -336,25 +335,25 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             for col2, date2 in date_cols.items():
                 if start <= date2 <= end:
                     color_hex = get_cell_color(ws.cell(row=row, column=col2))
-                    if color_hex is None or color_hex not in SKIP_COLORS:
+                    if color_hex is not None and color_hex not in SKIP_COLORS:
                         workday_count += 1
             if workday_count > 0:
                 daily_hours = total_hours / workday_count
                 for col2, date2 in date_cols.items():
                     if start <= date2 <= end:
                         color_hex = get_cell_color(ws.cell(row=row, column=col2))
-                        if color_hex is None or color_hex not in SKIP_COLORS:
+                        if color_hex is not None and color_hex not in SKIP_COLORS:
                             leave_assignment[(emp_id, date2)] = (leave_type, daily_hours)
 
         for col, date in date_cols.items():
             cell = ws.cell(row=row, column=col)
             color_hex = get_cell_color(cell)
 
-            # 跳过颜色：只有明确是跳过色才跳过，None 和红色都填充
-            if color_hex is not None and color_hex in SKIP_COLORS:
+            # 只有颜色存在且不是跳过色才填充（与您成功版本一致）
+            if color_hex is None or color_hex in SKIP_COLORS:
                 continue
 
-            # 记录所有非跳过色（用于异常数据区）
+            # 填充数据，并记录到 red_cells（异常区）
             red_cells.append((row, col))
 
             has_remote = remote_dict and (emp_id, date) in remote_dict
