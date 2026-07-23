@@ -136,7 +136,6 @@ def get_date_from_cell_value(cell_value):
 
 
 def get_cell_color(cell):
-    """返回十六进制颜色字符串，如果无法获取则返回 None"""
     fill = cell.fill
     if fill and isinstance(fill, PatternFill):
         fg = fill.fgColor
@@ -339,14 +338,15 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             for col2, date2 in date_cols.items():
                 if start <= date2 <= end:
                     color_hex = get_cell_color(ws.cell(row=row, column=col2))
-                    if color_hex is not None and color_hex not in SKIP_COLORS:
+                    # 只有明确跳过色才不算工作日，None 也算工作日
+                    if color_hex is None or color_hex not in SKIP_COLORS:
                         workday_count += 1
             if workday_count > 0:
                 daily_hours = total_hours / workday_count
                 for col2, date2 in date_cols.items():
                     if start <= date2 <= end:
                         color_hex = get_cell_color(ws.cell(row=row, column=col2))
-                        if color_hex is not None and color_hex not in SKIP_COLORS:
+                        if color_hex is None or color_hex not in SKIP_COLORS:
                             leave_assignment[(emp_id, date2)] = (leave_type, daily_hours)
 
         # ----- 遍历日期列 -----
@@ -354,51 +354,53 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             cell = ws.cell(row=row, column=col)
             color_hex = get_cell_color(cell)
 
-            # 只有读取到颜色且不在跳过色中才处理
-            if color_hex is None or color_hex in SKIP_COLORS:
-                continue
+            # 判断是否跳过：只有明确是跳过色才跳过，None 不跳过（与成功版本一致）
+            skip = False
+            if color_hex is not None and color_hex in SKIP_COLORS:
+                skip = True
 
-            # 记录红色（仅当颜色为 FF0000）
-            if color_hex == "FF0000":
-                red_cells.append((row, col))
+            if not skip:
+                # 记录红色（仅当颜色为 FF0000）
+                if color_hex == "FF0000":
+                    red_cells.append((row, col))
 
-            # ----- 填充数据 -----
-            has_remote = remote_dict and (emp_id, date) in remote_dict
-            remote_suffix = ""
-            if has_remote:
-                leave_type, location = remote_dict[(emp_id, date)]
-                if pd.isna(leave_type) or str(leave_type).strip() == "":
-                    leave_type = "远程工作"
-                remote_suffix = f" {leave_type}（{location}）"
-
-            if (emp_id, date) in leave_assignment:
-                leave_type, daily_hours = leave_assignment[(emp_id, date)]
-                text = f"{leave_type}{daily_hours:.1f}h"
-                if (emp_id, date) in checkins:
-                    cinfo = checkins[(emp_id, date)]
-                    times = []
-                    if cinfo["上班"]:
-                        times.append(f"上班{cinfo['上班']}")
-                    if cinfo["下班"]:
-                        times.append(f"下班{cinfo['下班']}")
-                    if cinfo["外出"]:
-                        times.extend([f"外出{t}" for t in cinfo["外出"]])
-                    if times:
-                        text += " " + " ".join(times)
-                    text += format_hours(cinfo)
+                # 填充数据
+                has_remote = remote_dict and (emp_id, date) in remote_dict
+                remote_suffix = ""
                 if has_remote:
-                    text += remote_suffix
-                cell.value = text
-                modified_count += 1
-                continue
+                    leave_type, location = remote_dict[(emp_id, date)]
+                    if pd.isna(leave_type) or str(leave_type).strip() == "":
+                        leave_type = "远程工作"
+                    remote_suffix = f" {leave_type}（{location}）"
 
-            text = generate_cell_text(emp_id, date, {}, checkins)
-            if text is not None:
-                if has_remote:
-                    cell.value = text + remote_suffix
-                else:
+                if (emp_id, date) in leave_assignment:
+                    leave_type, daily_hours = leave_assignment[(emp_id, date)]
+                    text = f"{leave_type}{daily_hours:.1f}h"
+                    if (emp_id, date) in checkins:
+                        cinfo = checkins[(emp_id, date)]
+                        times = []
+                        if cinfo["上班"]:
+                            times.append(f"上班{cinfo['上班']}")
+                        if cinfo["下班"]:
+                            times.append(f"下班{cinfo['下班']}")
+                        if cinfo["外出"]:
+                            times.extend([f"外出{t}" for t in cinfo["外出"]])
+                        if times:
+                            text += " " + " ".join(times)
+                        text += format_hours(cinfo)
+                    if has_remote:
+                        text += remote_suffix
                     cell.value = text
-                modified_count += 1
+                    modified_count += 1
+                    continue
+
+                text = generate_cell_text(emp_id, date, {}, checkins)
+                if text is not None:
+                    if has_remote:
+                        cell.value = text + remote_suffix
+                    else:
+                        cell.value = text
+                    modified_count += 1
 
     # 隐藏职级行
     for row in rows_to_hide:
