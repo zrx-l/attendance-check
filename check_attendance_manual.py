@@ -26,16 +26,120 @@ CHECKIN_COL_STATUS = 9
 
 HIDE_JOB_LEVELS = ["总监（业务）", "高级经理（业务）", "经理（业务）", "副经理（业务）"]
 
-# ...（省略 parse_leave_data, parse_checkin_data, parse_remote_data, get_date_from_cell_value, generate_cell_text，这些函数与您成功版本相同，我直接复用）...
+
+def parse_leave_data(file_path):
+    df = pd.read_excel(file_path, header=0, skiprows=[1], dtype=str)
+    df.columns = df.columns.str.strip()
+    leaves = {}
+    for _, row in df.iterrows():
+        emp_id = str(row.iloc[4]).strip()
+        date_range = row.iloc[8]
+        if pd.isna(date_range):
+            continue
+        try:
+            if "至" in date_range:
+                start_str, end_str = date_range.split("至")
+                start = pd.to_datetime(start_str.strip()).date()
+                end = pd.to_datetime(end_str.strip()).date()
+            else:
+                start = end = pd.to_datetime(date_range.strip()).date()
+        except:
+            continue
+        leave_type = row.iloc[7]
+        total_hours = float(row.iloc[9])
+        delta = (end - start).days + 1
+        for i in range(delta):
+            date = start + timedelta(days=i)
+            leaves[(emp_id, date)] = (leave_type, total_hours, start, end)
+    return leaves
+
+
+def parse_checkin_data(file_path):
+    df = pd.read_excel(file_path, sheet_name=CHECKIN_SHEET, dtype=str)
+    checkins = {}
+    for _, row in df.iterrows():
+        date_str = row.iloc[CHECKIN_COL_DATE]
+        try:
+            date = pd.to_datetime(date_str.split()[0]).date()
+        except:
+            continue
+        emp_id = str(row.iloc[CHECKIN_COL_ACCOUNT]).strip()
+        punch_type = row.iloc[CHECKIN_COL_TYPE]
+        punch_time = row.iloc[CHECKIN_COL_TIME]
+        status = row.iloc[CHECKIN_COL_STATUS] if CHECKIN_COL_STATUS < len(row) else ""
+        key = (emp_id, date)
+        if key not in checkins:
+            checkins[key] = {"上班": "", "下班": "", "外出": [], "异常": ""}
+        if pd.notna(punch_time) and str(punch_time).strip():
+            time_str = str(punch_time).strip()
+            if time_str == "--":
+                time_str = ""
+            else:
+                match = re.search(r'\d{1,2}:\d{2}', time_str)
+                if match:
+                    time_str = match.group()
+        else:
+            time_str = ""
+        if punch_type == "上班":
+            checkins[key]["上班"] = time_str
+        elif punch_type == "下班":
+            checkins[key]["下班"] = time_str
+        elif "外出" in punch_type:
+            if time_str:
+                checkins[key]["外出"].append(time_str)
+        if status and "缺卡" in status:
+            checkins[key]["异常"] = status
+    return checkins
+
+
+def parse_remote_data(file_path):
+    try:
+        df = pd.read_excel(file_path, header=0, dtype=str)
+        remote_dict = {}
+        for _, row in df.iterrows():
+            emp_id = str(row.iloc[1]).strip()
+            date_range = row.iloc[6]
+            leave_type = row.iloc[7]
+            location = row.iloc[8]
+            if pd.isna(date_range) or pd.isna(emp_id):
+                continue
+            try:
+                if " - " in date_range:
+                    start_str, end_str = date_range.split(" - ")
+                    start = pd.to_datetime(start_str.strip()).date()
+                    end = pd.to_datetime(end_str.strip()).date()
+                else:
+                    start = end = pd.to_datetime(date_range.strip()).date()
+            except:
+                continue
+            delta = (end - start).days + 1
+            for i in range(delta):
+                date = start + timedelta(days=i)
+                remote_dict[(emp_id, date)] = (leave_type, location)
+        return remote_dict
+    except Exception as e:
+        print(f"读取远程办公文件失败: {e}")
+        return {}
+
+
+def get_date_from_cell_value(cell_value):
+    if isinstance(cell_value, datetime):
+        return cell_value.date()
+    s = str(cell_value).strip()
+    if '.' in s:
+        s = s.split('.')[0]
+    if len(s) == 8 and s.isdigit():
+        return datetime.strptime(s, "%Y%m%d").date()
+    elif '-' in s:
+        return datetime.strptime(s[:10], "%Y-%m-%d").date()
+    return None
+
 
 def get_cell_color(cell):
-    """增强版：尝试多种方式获取颜色，返回十六进制字符串，如果获取失败返回 None"""
     fill = cell.fill
     if fill and isinstance(fill, PatternFill):
-        # 尝试 fgColor
         fg = fill.fgColor
         if fg:
-            # 尝试 rgb 属性
             if hasattr(fg, 'rgb') and fg.rgb:
                 rgb = fg.rgb
                 if isinstance(rgb, str):
@@ -43,7 +147,6 @@ def get_cell_color(cell):
                         return rgb[2:].upper()
                     else:
                         return rgb.upper()
-            # 索引颜色
             if fg.type == 'indexed':
                 color = COLOR_INDEX.get(fg.indexed)
                 if color:
@@ -51,19 +154,16 @@ def get_cell_color(cell):
                         return color[2:].upper()
                     else:
                         return color.upper()
-            # 主题颜色 (简单处理：主题索引 2 为红色)
             if fg.type == 'theme':
-                # 主题颜色索引对应关系（常用）
                 theme_colors = {
-                    0: "000000",  # 深色1
-                    1: "FFFFFF",  # 浅色1
-                    2: "FF0000",  # 强调文字颜色1 (红色)
-                    3: "00FF00",  # 强调文字颜色2 (绿色)
-                    4: "0000FF",  # 强调文字颜色3 (蓝色)
+                    0: "000000",
+                    1: "FFFFFF",
+                    2: "FF0000",
+                    3: "00FF00",
+                    4: "0000FF",
                 }
                 if fg.theme in theme_colors:
                     return theme_colors[fg.theme]
-        # 如果 fgColor 不行，尝试 bgColor
         bg = fill.bgColor
         if bg and hasattr(bg, 'rgb') and bg.rgb:
             rgb = bg.rgb
@@ -73,6 +173,75 @@ def get_cell_color(cell):
                 else:
                     return rgb.upper()
     return None
+
+
+# ================== 新增：工时计算函数 ==================
+def format_hours(cinfo):
+    has_上班 = bool(cinfo.get("上班"))
+    has_下班 = bool(cinfo.get("下班"))
+    if has_上班 and has_下班:
+        try:
+            t1 = datetime.strptime(cinfo["上班"], "%H:%M")
+            t2 = datetime.strptime(cinfo["下班"], "%H:%M")
+            if t2 < t1:
+                t2 += timedelta(days=1)
+            diff_hours = (t2 - t1).total_seconds() / 3600
+            if diff_hours > 0:
+                return f" ({diff_hours:.1f}h)"
+        except:
+            pass
+    return ""
+
+
+def generate_cell_text(emp_id, date, leaves, checkins):
+    if (emp_id, date) in leaves:
+        leave_type, hours = leaves[(emp_id, date)]
+        text = f"{leave_type}{hours}h"
+        if (emp_id, date) in checkins:
+            cinfo = checkins[(emp_id, date)]
+            times = []
+            if cinfo["上班"]:
+                times.append(f"上班{cinfo['上班']}")
+            if cinfo["下班"]:
+                times.append(f"下班{cinfo['下班']}")
+            if cinfo["外出"]:
+                times.extend([f"外出{t}" for t in cinfo["外出"]])
+            if times:
+                text += " " + " ".join(times)
+            # 新增：追加总工时
+            text += format_hours(cinfo)
+        return text
+
+    if (emp_id, date) in checkins:
+        cinfo = checkins[(emp_id, date)]
+        has_上班 = bool(cinfo["上班"])
+        has_下班 = bool(cinfo["下班"])
+        has_外出 = len(cinfo["外出"]) > 0
+
+        if not has_上班 and not has_下班:
+            text = "缺卡2次"
+            if has_外出:
+                text += " " + " ".join([f"外出{t}" for t in cinfo["外出"]])
+            return text
+
+        parts = []
+        if has_上班:
+            parts.append(f"上班{cinfo['上班']}")
+        else:
+            parts.append("缺卡1次")
+        if has_下班:
+            parts.append(f"下班{cinfo['下班']}")
+        else:
+            parts.append("缺卡1次")
+        if has_外出:
+            parts.extend([f"外出{t}" for t in cinfo["外出"]])
+        text = " ".join(parts)
+        # 新增：追加总工时
+        text += format_hours(cinfo)
+        return text
+
+    return "缺卡2次"
+
 
 def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file):
     wb = openpyxl.load_workbook(template_path, data_only=True)
@@ -126,9 +295,8 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
 
     rows_to_hide = []
     modified_count = 0
-    # 跳过颜色：绿色、灰色、白色、黑色、浅灰色（可能还有其他，但都跳过）
     SKIP_COLORS = {"00FF00", "808080", "FFFFFF", "000000", "F0F0F0"}
-    red_cells = []  # 存储所有非跳过颜色的单元格 (row, col)
+    red_cells = []
 
     for row in range(6, max_row + 1):
         emp_cell = ws.cell(row=row, column=2)
@@ -182,14 +350,12 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
         for col, date in date_cols.items():
             cell = ws.cell(row=row, column=col)
             color_hex = get_cell_color(cell)
-            
-            # 判断是否跳过：只有明确是跳过色才跳过，读不到颜色（None）就继续填充
+
             skip = False
             if color_hex is not None and color_hex in SKIP_COLORS:
                 skip = True
-            
+
             if not skip:
-                # 记录所有非跳过色的单元格，用于异常数据区
                 red_cells.append((row, col))
 
                 has_remote = remote_dict and (emp_id, date) in remote_dict
@@ -242,7 +408,6 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     ws_new = wb["异常数据区"]
 
     max_col = max(date_cols.keys()) if date_cols else 46
-    # 复制全部内容
     for r in range(1, max_row + 1):
         for c in range(1, max_col + 1):
             src = ws.cell(row=r, column=c)
@@ -256,7 +421,6 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                 dst.protection = src.protection.copy()
                 dst.alignment = src.alignment.copy()
 
-    # 清除非红色（即非跳过颜色）单元格的内容
     red_rows = set()
     red_cols = set()
     for (r, c) in red_cells:
@@ -268,7 +432,6 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             if (row, col) not in red_cells:
                 ws_new.cell(row=row, column=col).value = None
 
-    # 删除没有红色数据的行和列
     for row in range(max_row, 5, -1):
         if row not in red_rows:
             ws_new.delete_rows(row)
@@ -286,13 +449,64 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     sys.stdout.flush()
 
 
-def run_attendance_check(start_date, end_date, department, template_file, checkin_file, leave_file, remote_file=None):
-    # ... 与您成功版本相同，保持不变
-    pass
+def run_attendance_check(start_date, end_date, department, template_file, checkin_file, leave_file=None, remote_file=None):
+    print("正在读取休假数据...")
+    sys.stdout.flush()
+    leaves = {}
+    if leave_file and Path(leave_file).exists():
+        leaves = parse_leave_data(leave_file)
+        print(f"  共 {len(leaves)} 条请假记录（按天展开）")
+    else:
+        print("  未提供休假文件，跳过")
+    sys.stdout.flush()
+
+    print("正在读取打卡数据...")
+    sys.stdout.flush()
+    checkins = parse_checkin_data(checkin_file)
+    print(f"  共 {len(checkins)} 个员工-日期打卡记录")
+    sys.stdout.flush()
+
+    remote_dict = {}
+    if remote_file and Path(remote_file).exists():
+        print("正在读取远程办公数据...")
+        sys.stdout.flush()
+        remote_dict = parse_remote_data(remote_file)
+        print(f"  共 {len(remote_dict)} 条远程办公记录")
+    else:
+        print("未提供远程办公文件，跳过")
+    sys.stdout.flush()
+
+    print("正在处理考勤模板...")
+    sys.stdout.flush()
+
+    base_dir = Path(__file__).parent
+    output_dir = base_dir / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
+    start_str = f"{start.year}.{start.month}.{start.day}"
+    end_str = f"{end.year}.{end.month}.{end.day}"
+    filename = f"{department}考勤（{start_str}-{end_str}）.xlsx"
+    output_file = output_dir / filename
+
+    process_template_openpyxl(template_file, leaves, checkins, remote_dict, output_file)
+    print("处理完成")
+    sys.stdout.flush()
+
 
 def main():
-    # ... 与您成功版本相同，保持不变
-    pass
+    parser = argparse.ArgumentParser(description="考勤核对工具")
+    parser.add_argument("--start", required=True, help="起始日期，如 2026-04-01")
+    parser.add_argument("--end", required=True, help="截止日期，如 2026-04-30")
+    parser.add_argument("--dept", default="工程造价一部", help="部门名称")
+    parser.add_argument("--template", required=True, help="考勤模板文件路径")
+    parser.add_argument("--checkin", required=True, help="打卡日报文件路径")
+    parser.add_argument("--leave", default=None, help="休假数据文件路径（可选）")
+    parser.add_argument("--remote", default=None, help="远程办公文件路径（可选）")
+    args = parser.parse_args()
+    run_attendance_check(args.start, args.end, args.dept, args.template, args.checkin, args.leave, args.remote)
+
 
 if __name__ == "__main__":
     main()
