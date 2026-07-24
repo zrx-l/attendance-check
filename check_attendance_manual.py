@@ -414,8 +414,8 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             cell = ws.cell(row=row, column=col)
             cell.alignment = Alignment(wrap_text=True)
 
-    # ----- 创建异常数据区（直接插入到报表区之前，避免移动破坏图表） -----
-    wb.create_sheet("异常数据区", index=1)
+    # ----- 创建异常数据区（直接创建在最后，不移动，避免影响图表） -----
+    wb.create_sheet("异常数据区")
     ws_new = wb["异常数据区"]
 
     max_col = max(date_cols.keys()) if date_cols else 46
