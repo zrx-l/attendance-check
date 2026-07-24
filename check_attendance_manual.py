@@ -295,8 +295,11 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
 
     # ----- 遍历行 -----
     for row in range(6, max_row + 1):
-        # 简化：直接获取 B 列值，不处理合并单元格
+        # 获取员工ID（B列），并调试打印
         emp_id = ws.cell(row=row, column=2).value
+        if row < 20:  # 只打印前20行
+            print(f"调试: 行{row} emp_id={repr(emp_id)}")
+            sys.stdout.flush()
         if not emp_id or str(emp_id).strip() == "":
             continue
         emp_id = str(emp_id).strip()
