@@ -248,8 +248,6 @@ def get_cell_color(cell):
                     return rgb.upper()
     return None
 
-
-# ================== process_template_openpyxl 与成功版本完全一致 ==================
 def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file):
     wb = openpyxl.load_workbook(template_path, data_only=True)
     ws = wb["报表区"]
@@ -363,8 +361,7 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                 skip = True
 
             if not skip:
-                red_cells.append((row, col))
-
+                # 填充数据
                 has_remote = remote_dict and (emp_id, date) in remote_dict
                 remote_suffix = ""
                 if has_remote:
@@ -400,6 +397,10 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                     else:
                         cell.value = text
                     modified_count += 1
+
+                # 记录红色（仅当颜色为 FF0000）
+                if color_hex == "FF0000":
+                    red_cells.append((row, col))
 
     for row in rows_to_hide:
         ws.row_dimensions[row].hidden = True
@@ -454,6 +455,7 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     print(f"实际修改单元格数: {modified_count}")
     print(f"异常数据区行数: {len(red_rows)} 行, 列数: {len(red_cols)} 列")
     sys.stdout.flush()
+
 
 
 # ================== 修改：补全 run_attendance_check，使休假可选 ==================
