@@ -298,6 +298,9 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     SKIP_COLORS = {"00FF00", "808080", "FFFFFF", "000000", "F0F0F0"}
     red_cells = []
 
+    # 调试标志
+    color_printed = False
+
     for row in range(6, max_row + 1):
         emp_cell = ws.cell(row=row, column=2)
         emp_id = None
@@ -356,6 +359,12 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                 skip = True
 
             if not skip:
+                # 调试：打印第一个非跳过色的颜色值（只打印一次）
+                if color_hex is not None and not color_printed:
+                    print(f"调试颜色值: {color_hex}")
+                    sys.stdout.flush()
+                    color_printed = True
+
                 # 填充数据
                 has_remote = remote_dict and (emp_id, date) in remote_dict
                 remote_suffix = ""
@@ -393,8 +402,10 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                         cell.value = text
                     modified_count += 1
 
-                # 记录红色（仅当颜色为 FF0000）
-                if color_hex == "FF0000":
+                # 记录红色（暂时用调试值，之后根据日志修改）
+                if color_hex is not None:
+                    # 这里暂时记录所有非跳过色，以便异常区有数据
+                    # 后续根据打印的颜色值修改匹配条件
                     red_cells.append((row, col))
 
     for row in rows_to_hide:
@@ -450,7 +461,6 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     print(f"实际修改单元格数: {modified_count}")
     print(f"异常数据区行数: {len(red_rows)} 行, 列数: {len(red_cols)} 列")
     sys.stdout.flush()
-
 
 
 # ================== 修改：补全 run_attendance_check，使休假可选 ==================
