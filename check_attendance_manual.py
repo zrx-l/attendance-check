@@ -143,7 +143,7 @@ def get_cell_color(cell):
             if hasattr(fg, 'rgb') and fg.rgb:
                 rgb = fg.rgb
                 if isinstance(rgb, str):
-                    # 去掉可能的前缀（如 '00' 或 'FF'），保留后六位
+                    # 去掉可能的 alpha 前缀（如 '00' 或 'FF'），保留后六位
                     if len(rgb) >= 6:
                         return rgb[-6:].upper()
             if fg.type == 'indexed':
@@ -351,8 +351,6 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             for col2, date2 in date_cols.items():
                 if start <= date2 <= end:
                     color_hex = get_cell_color(ws.cell(row=row, column=col2))
-                    # 只有明确跳过色才不算工作日，None 也不算工作日（与成功版本一致？）
-                    # 但实际上成功版本中 None 是被填充的，但为了不填充无背景色，我们让 None 算跳过
                     if color_hex is None or color_hex in SKIP_COLORS:
                         pass
                     else:
