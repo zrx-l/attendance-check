@@ -27,7 +27,7 @@ CHECKIN_COL_STATUS = 9
 HIDE_JOB_LEVELS = ["总监（业务）", "高级经理（业务）", "经理（业务）", "副经理（业务）"]
 
 
-# ================== 完整函数定义（与您成功版本完全一致） ==================
+# ================== 完整函数定义 ==================
 def parse_leave_data(file_path):
     df = pd.read_excel(file_path, header=0, skiprows=[1], dtype=str)
     df.columns = df.columns.str.strip()
@@ -136,7 +136,7 @@ def get_date_from_cell_value(cell_value):
     return None
 
 
-# ================== 新增：工时计算函数 ==================
+# ================== 工时计算函数 ==================
 def format_hours(cinfo):
     has_上班 = bool(cinfo.get("上班"))
     has_下班 = bool(cinfo.get("下班"))
@@ -154,11 +154,7 @@ def format_hours(cinfo):
     return ""
 
 
-# ================== 修改：generate_cell_text 追加总工时 ==================
 def generate_cell_text(emp_id, date, leaves, checkins):
-    """
-    生成单元格文本，与成功版本逻辑一致，仅新增了工时计算。
-    """
     if (emp_id, date) in leaves:
         leave_type, hours = leaves[(emp_id, date)]
         text = f"{leave_type}{hours}h"
@@ -173,7 +169,6 @@ def generate_cell_text(emp_id, date, leaves, checkins):
                 times.extend([f"外出{t}" for t in cinfo["外出"]])
             if times:
                 text += " " + " ".join(times)
-            # 新增：追加总工时
             text += format_hours(cinfo)
         return text
 
@@ -201,14 +196,12 @@ def generate_cell_text(emp_id, date, leaves, checkins):
         if has_外出:
             parts.extend([f"外出{t}" for t in cinfo["外出"]])
         text = " ".join(parts)
-        # 新增：追加总工时
         text += format_hours(cinfo)
         return text
 
     return "缺卡2次"
 
 
-# ================== get_cell_color 与成功版本完全一致 ==================
 def get_cell_color(cell):
     fill = cell.fill
     if fill and isinstance(fill, PatternFill):
@@ -243,6 +236,8 @@ def get_cell_color(cell):
                 if len(rgb) >= 6:
                     return rgb[-6:].upper()
     return None
+
+
 def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file):
     wb = openpyxl.load_workbook(template_path, data_only=True)
     ws = wb["报表区"]
@@ -295,11 +290,9 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
 
     rows_to_hide = []
     modified_count = 0
-    SKIP_COLORS = {"00FF00", "808080", "FFFFFF", "000000", "F0F0F0"}
+    # 扩展跳过色：加入常用的灰色，避免误填充
+    SKIP_COLORS = {"00FF00", "808080", "FFFFFF", "000000", "F0F0F0", "C0C0C0", "D0D0D0", "E0E0E0"}
     red_cells = []
-
-    # 调试标志
-    color_printed = False
 
     for row in range(6, max_row + 1):
         emp_cell = ws.cell(row=row, column=2)
@@ -354,59 +347,50 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             cell = ws.cell(row=row, column=col)
             color_hex = get_cell_color(cell)
 
-            skip = False
-            if color_hex is not None and color_hex in SKIP_COLORS:
-                skip = True
+            # 跳过绿色/灰色/白色等
+            if color_hex is not None and color_hex.upper() in SKIP_COLORS:
+                continue
 
-            if not skip:
-                # 调试：打印第一个非跳过色的颜色值（只打印一次）
-                if color_hex is not None and not color_printed:
-                    print(f"调试颜色值: {color_hex}")
-                    sys.stdout.flush()
-                    color_printed = True
+            # 只有非跳过色才进入填充逻辑
+            has_remote = remote_dict and (emp_id, date) in remote_dict
+            remote_suffix = ""
+            if has_remote:
+                leave_type, location = remote_dict[(emp_id, date)]
+                if pd.isna(leave_type) or str(leave_type).strip() == "":
+                    leave_type = "远程工作"
+                remote_suffix = f" {leave_type}（{location}）"
 
-                # 填充数据
-                has_remote = remote_dict and (emp_id, date) in remote_dict
-                remote_suffix = ""
+            if (emp_id, date) in leave_assignment:
+                leave_type, daily_hours = leave_assignment[(emp_id, date)]
+                text = f"{leave_type}{daily_hours:.1f}h"
+                if (emp_id, date) in checkins:
+                    cinfo = checkins[(emp_id, date)]
+                    times = []
+                    if cinfo["上班"]:
+                        times.append(f"上班{cinfo['上班']}")
+                    if cinfo["下班"]:
+                        times.append(f"下班{cinfo['下班']}")
+                    if cinfo["外出"]:
+                        times.extend([f"外出{t}" for t in cinfo["外出"]])
+                    if times:
+                        text += " " + " ".join(times)
                 if has_remote:
-                    leave_type, location = remote_dict[(emp_id, date)]
-                    if pd.isna(leave_type) or str(leave_type).strip() == "":
-                        leave_type = "远程工作"
-                    remote_suffix = f" {leave_type}（{location}）"
+                    text += remote_suffix
+                cell.value = text
+                modified_count += 1
+                continue
 
-                if (emp_id, date) in leave_assignment:
-                    leave_type, daily_hours = leave_assignment[(emp_id, date)]
-                    text = f"{leave_type}{daily_hours:.1f}h"
-                    if (emp_id, date) in checkins:
-                        cinfo = checkins[(emp_id, date)]
-                        times = []
-                        if cinfo["上班"]:
-                            times.append(f"上班{cinfo['上班']}")
-                        if cinfo["下班"]:
-                            times.append(f"下班{cinfo['下班']}")
-                        if cinfo["外出"]:
-                            times.extend([f"外出{t}" for t in cinfo["外出"]])
-                        if times:
-                            text += " " + " ".join(times)
-                    if has_remote:
-                        text += remote_suffix
+            text = generate_cell_text(emp_id, date, {}, checkins)
+            if text is not None:
+                if has_remote:
+                    cell.value = text + remote_suffix
+                else:
                     cell.value = text
-                    modified_count += 1
-                    continue
+                modified_count += 1
 
-                text = generate_cell_text(emp_id, date, {}, checkins)
-                if text is not None:
-                    if has_remote:
-                        cell.value = text + remote_suffix
-                    else:
-                        cell.value = text
-                    modified_count += 1
-
-                # 记录红色（暂时用调试值，之后根据日志修改）
-                if color_hex is not None:
-                    # 这里暂时记录所有非跳过色，以便异常区有数据
-                    # 后续根据打印的颜色值修改匹配条件
-                    red_cells.append((row, col))
+            # 记录红色单元格（只记录真正的红色）
+            if color_hex and "FF0000" in color_hex.upper():
+                red_cells.append((row, col))
 
     for row in rows_to_hide:
         ws.row_dimensions[row].hidden = True
@@ -418,6 +402,7 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             cell = ws.cell(row=row, column=col)
             cell.alignment = Alignment(wrap_text=True)
 
+    # 创建异常数据区
     wb.create_sheet("异常数据区")
     ws_new = wb["异常数据区"]
 
@@ -463,7 +448,6 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     sys.stdout.flush()
 
 
-# ================== 修改：补全 run_attendance_check，使休假可选 ==================
 def run_attendance_check(start_date, end_date, department, template_file, checkin_file, leave_file=None, remote_file=None):
     print("正在读取休假数据...")
     sys.stdout.flush()
@@ -510,7 +494,6 @@ def run_attendance_check(start_date, end_date, department, template_file, checki
     sys.stdout.flush()
 
 
-# ================== 修改：main 中 --leave 变为可选 ==================
 def main():
     parser = argparse.ArgumentParser(description="考勤核对工具")
     parser.add_argument("--start", required=True, help="起始日期，如 2026-04-01")
