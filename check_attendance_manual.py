@@ -242,7 +242,7 @@ def generate_cell_text(emp_id, date, leaves, checkins):
 
 def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file):
     wb = openpyxl.load_workbook(template_path, data_only=True)
-    ws = wb["报表区"]
+    ws = wb["报表区"]  # 先定义 ws
 
     # ----- 识别日期列 -----
     date_row = 4
@@ -271,6 +271,22 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
         return
     print(f"识别到的日期列数: {len(date_cols)}")
     sys.stdout.flush()
+
+    # ----- 调试：打印第一个有颜色的单元格的信息 -----
+    for row in range(6, 10):
+        found = False
+        for col in date_cols.keys():
+            cell = ws.cell(row=row, column=col)
+            if cell.fill and cell.fill.fgColor:
+                print(f"调试: 行{row}列{col} fill type: {cell.fill.fgColor.type}, rgb: {getattr(cell.fill.fgColor, 'rgb', None)}, indexed: {getattr(cell.fill.fgColor, 'indexed', None)}, theme: {getattr(cell.fill.fgColor, 'theme', None)}")
+                sys.stdout.flush()
+                found = True
+                break
+        if found:
+            break
+    else:
+        print("调试: 未找到任何有背景色的单元格")
+        sys.stdout.flush()
 
     # ----- 动态识别数据行数 -----
     last_row = 6
