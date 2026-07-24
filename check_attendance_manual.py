@@ -130,8 +130,8 @@ def get_date_from_cell_value(cell_value):
         return datetime.strptime(s[:10], "%Y-%m-%d").date()
     return None
 
+# ================== 新增：工时计算函数 ==================
 def format_hours(cinfo):
-    """计算工时并返回字符串，如 (8.5h)"""
     has_上班 = bool(cinfo.get("上班"))
     has_下班 = bool(cinfo.get("下班"))
     if has_上班 and has_下班:
@@ -162,7 +162,7 @@ def generate_cell_text(emp_id, date, leaves, checkins):
                 times.extend([f"外出{t}" for t in cinfo["外出"]])
             if times:
                 text += " " + " ".join(times)
-            text += format_hours(cinfo)
+            text += format_hours(cinfo)  # 新增
         return text
 
     if (emp_id, date) in checkins:
@@ -189,13 +189,13 @@ def generate_cell_text(emp_id, date, leaves, checkins):
         if has_外出:
             parts.extend([f"外出{t}" for t in cinfo["外出"]])
         text = " ".join(parts)
-        text += format_hours(cinfo)
+        text += format_hours(cinfo)  # 新增
         return text
 
     return "缺卡2次"
 
+# ================== 颜色获取函数（与成功版本完全一致） ==================
 def get_cell_color(cell):
-    """增强版：尝试多种方式获取颜色，返回十六进制字符串，如果获取失败返回 None"""
     fill = cell.fill
     if fill and isinstance(fill, PatternFill):
         fg = fill.fgColor
@@ -371,7 +371,7 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                             times.extend([f"外出{t}" for t in cinfo["外出"]])
                         if times:
                             text += " " + " ".join(times)
-                        text += format_hours(cinfo)  # 休假+打卡也追加工时
+                        text += format_hours(cinfo)  # 新增
                     if has_remote:
                         text += remote_suffix
                     cell.value = text
