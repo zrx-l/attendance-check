@@ -268,22 +268,6 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     print(f"识别到的日期列数: {len(date_cols)}")
     sys.stdout.flush()
 
-    # ----- 调试：打印第一个有颜色的单元格的信息 -----
-    for row in range(6, 10):
-        found = False
-        for col in date_cols.keys():
-            cell = ws.cell(row=row, column=col)
-            if cell.fill and cell.fill.fgColor:
-                print(f"调试: 行{row}列{col} fill type: {cell.fill.fgColor.type}, rgb: {getattr(cell.fill.fgColor, 'rgb', None)}, indexed: {getattr(cell.fill.fgColor, 'indexed', None)}, theme: {getattr(cell.fill.fgColor, 'theme', None)}")
-                sys.stdout.flush()
-                found = True
-                break
-        if found:
-            break
-    else:
-        print("调试: 未找到任何有背景色的单元格")
-        sys.stdout.flush()
-
     # ----- 动态识别数据行数 -----
     last_row = 6
     for r in range(6, 501):
@@ -311,15 +295,8 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
 
     # ----- 遍历行 -----
     for row in range(6, max_row + 1):
-        emp_cell = ws.cell(row=row, column=2)
-        emp_id = None
-        if emp_cell.coordinate in ws.merged_cells:
-            for merged_range in ws.merged_cells.ranges:
-                if emp_cell.coordinate in merged_range:
-                    emp_id = ws.cell(row=merged_range.min_row, column=merged_range.min_col).value
-                    break
-        else:
-            emp_id = emp_cell.value
+        # 简化：直接获取 B 列值，不处理合并单元格
+        emp_id = ws.cell(row=row, column=2).value
         if not emp_id or str(emp_id).strip() == "":
             continue
         emp_id = str(emp_id).strip()
