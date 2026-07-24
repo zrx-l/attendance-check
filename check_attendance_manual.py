@@ -217,10 +217,8 @@ def get_cell_color(cell):
             if hasattr(fg, 'rgb') and fg.rgb:
                 rgb = fg.rgb
                 if isinstance(rgb, str):
-                    if rgb.startswith('FF'):
-                        return rgb[2:].upper()
-                    else:
-                        return rgb.upper()
+                    if len(rgb) >= 6:
+                        return rgb[-6:].upper()
             if fg.type == 'indexed':
                 color = COLOR_INDEX.get(fg.indexed)
                 if color:
@@ -242,12 +240,9 @@ def get_cell_color(cell):
         if bg and hasattr(bg, 'rgb') and bg.rgb:
             rgb = bg.rgb
             if isinstance(rgb, str):
-                if rgb.startswith('FF'):
-                    return rgb[2:].upper()
-                else:
-                    return rgb.upper()
+                if len(rgb) >= 6:
+                    return rgb[-6:].upper()
     return None
-
 def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file):
     wb = openpyxl.load_workbook(template_path, data_only=True)
     ws = wb["报表区"]
