@@ -16,6 +16,7 @@ from openpyxl.styles.colors import COLOR_INDEX
 GREEN_RGB = "00FF00"
 GRAY_RGB = "808080"
 WHITE_RGB = "FFFFFF"
+YELLOW_RGB = "FFFF00"   # 黄色
 
 CHECKIN_SHEET = 1
 CHECKIN_COL_DATE = 0
@@ -161,6 +162,7 @@ def get_cell_color(cell):
                     2: "FF0000",
                     3: "00FF00",
                     4: "0000FF",
+                    5: "FFFF00",  # 黄色主题索引可能是5
                 }
                 if fg.theme in theme_colors:
                     return theme_colors[fg.theme]
@@ -295,6 +297,7 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     rows_to_hide = []
     modified_count = 0
     SKIP_COLORS = {"00FF00", "808080", "FFFFFF", "000000", "F0F0F0"}
+    YELLOW = "FFFF00"
     red_cells = []  # 只记录真正红色的单元格
 
     # ----- 遍历行 -----
@@ -338,15 +341,14 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             for col2, date2 in date_cols.items():
                 if start <= date2 <= end:
                     color_hex = get_cell_color(ws.cell(row=row, column=col2))
-                    # 只有明确跳过色才不算工作日，None 也算工作日
-                    if color_hex is None or color_hex not in SKIP_COLORS:
+                    if color_hex is not None and color_hex not in SKIP_COLORS and color_hex != YELLOW:
                         workday_count += 1
             if workday_count > 0:
                 daily_hours = total_hours / workday_count
                 for col2, date2 in date_cols.items():
                     if start <= date2 <= end:
                         color_hex = get_cell_color(ws.cell(row=row, column=col2))
-                        if color_hex is None or color_hex not in SKIP_COLORS:
+                        if color_hex is not None and color_hex not in SKIP_COLORS and color_hex != YELLOW:
                             leave_assignment[(emp_id, date2)] = (leave_type, daily_hours)
 
         # ----- 遍历日期列 -----
@@ -354,26 +356,14 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             cell = ws.cell(row=row, column=col)
             color_hex = get_cell_color(cell)
 
-            # 判断是否跳过：只有明确是跳过色才跳过，None 不跳过（与成功版本一致）
-            skip = False
+            # 跳过色
             if color_hex is not None and color_hex in SKIP_COLORS:
-                skip = True
+                continue
 
-            if not skip:
-                # 记录红色（仅当颜色为 FF0000）
-                if color_hex == "FF0000":
-                    red_cells.append((row, col))
-
-                # 填充数据
-                has_remote = remote_dict and (emp_id, date) in remote_dict
-                remote_suffix = ""
-                if has_remote:
-                    leave_type, location = remote_dict[(emp_id, date)]
-                    if pd.isna(leave_type) or str(leave_type).strip() == "":
-                        leave_type = "远程工作"
-                    remote_suffix = f" {leave_type}（{location}）"
-
+            # 黄色处理：只有有休假数据时才填充，否则跳过
+            if color_hex == YELLOW:
                 if (emp_id, date) in leave_assignment:
+                    # 填充休假内容
                     leave_type, daily_hours = leave_assignment[(emp_id, date)]
                     text = f"{leave_type}{daily_hours:.1f}h"
                     if (emp_id, date) in checkins:
@@ -388,19 +378,53 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                         if times:
                             text += " " + " ".join(times)
                         text += format_hours(cinfo)
-                    if has_remote:
-                        text += remote_suffix
                     cell.value = text
                     modified_count += 1
-                    continue
+                # 否则跳过（不填充）
+                continue
 
-                text = generate_cell_text(emp_id, date, {}, checkins)
-                if text is not None:
-                    if has_remote:
-                        cell.value = text + remote_suffix
-                    else:
-                        cell.value = text
-                    modified_count += 1
+            # 红色记录
+            if color_hex == "FF0000":
+                red_cells.append((row, col))
+
+            # 其他非跳过色（非黄、非绿、非灰、非白）正常填充
+            # 注意：我们已经在前面跳过了跳过色和黄色，所以这里可以直接填充
+            has_remote = remote_dict and (emp_id, date) in remote_dict
+            remote_suffix = ""
+            if has_remote:
+                leave_type, location = remote_dict[(emp_id, date)]
+                if pd.isna(leave_type) or str(leave_type).strip() == "":
+                    leave_type = "远程工作"
+                remote_suffix = f" {leave_type}（{location}）"
+
+            if (emp_id, date) in leave_assignment:
+                leave_type, daily_hours = leave_assignment[(emp_id, date)]
+                text = f"{leave_type}{daily_hours:.1f}h"
+                if (emp_id, date) in checkins:
+                    cinfo = checkins[(emp_id, date)]
+                    times = []
+                    if cinfo["上班"]:
+                        times.append(f"上班{cinfo['上班']}")
+                    if cinfo["下班"]:
+                        times.append(f"下班{cinfo['下班']}")
+                    if cinfo["外出"]:
+                        times.extend([f"外出{t}" for t in cinfo["外出"]])
+                    if times:
+                        text += " " + " ".join(times)
+                    text += format_hours(cinfo)
+                if has_remote:
+                    text += remote_suffix
+                cell.value = text
+                modified_count += 1
+                continue
+
+            text = generate_cell_text(emp_id, date, {}, checkins)
+            if text is not None:
+                if has_remote:
+                    cell.value = text + remote_suffix
+                else:
+                    cell.value = text
+                modified_count += 1
 
     # 隐藏职级行
     for row in rows_to_hide:
@@ -414,12 +438,11 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             cell = ws.cell(row=row, column=col)
             cell.alignment = Alignment(wrap_text=True)
 
-    # ----- 创建异常数据区（直接创建在最后，不移动，避免影响图表） -----
-    wb.create_sheet("异常数据区")
+    # ----- 创建异常数据区（直接插入到报表区之前） -----
+    wb.create_sheet("异常数据区", index=1)
     ws_new = wb["异常数据区"]
 
     max_col = max(date_cols.keys()) if date_cols else 46
-    # 复制报表区全部内容（包括格式）
     for r in range(1, max_row + 1):
         for c in range(1, max_col + 1):
             src = ws.cell(row=r, column=c)
