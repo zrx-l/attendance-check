@@ -293,14 +293,46 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     modified_count = 0
     red_cells = []
 
-    # Debug: 扫描模板中所有唯一颜色值
+    # Debug: 深度检查模板单元格的fill结构
+    fill_type_samples = {}
+    fg_type_samples = {}
+    sample_details = []
+    sample_count = 0
+    for r in range(6, max_row + 1):
+        for c, _ in date_cols.items():
+            cell = ws.cell(row=r, column=c)
+            fill = cell.fill
+            ft = type(fill).__name__ if fill else "None"
+            fill_type_samples[ft] = fill_type_samples.get(ft, 0) + 1
+            fg_info = "no_fg"
+            if fill and hasattr(fill, 'fgColor') and fill.fgColor:
+                fg = fill.fgColor
+                fg_info = f"type={fg.type}"
+                if hasattr(fg, 'rgb'): fg_info += f" rgb={fg.rgb}"
+                if hasattr(fg, 'indexed'): fg_info += f" indexed={fg.indexed}"
+                if hasattr(fg, 'theme'): fg_info += f" theme={fg.theme}"
+                if hasattr(fg, 'tint'): fg_info += f" tint={fg.tint}"
+                if hasattr(fg, 'value'): fg_info += f" value={fg.value}"
+            fg_type_samples[fg_info] = fg_type_samples.get(fg_info, 0) + 1
+            if sample_count < 5:
+                sample_details.append(f"  cell({r},{c}): fill_type={ft}, fg_info={fg_info}")
+                sample_count += 1
+            if sample_count >= 5:
+                break
+        if sample_count >= 5:
+            break
+    print(f"调试：fill类型分布: {fill_type_samples}")
+    print(f"调试：fgColor属性分布: {fg_type_samples}")
+    for s in sample_details:
+        print(s)
+    # 扫描模板中所有唯一颜色值
     all_template_colors = set()
     for r in range(6, max_row + 1):
         for c, _ in date_cols.items():
             ch = get_cell_color(ws.cell(row=r, column=c))
             if ch is not None:
                 all_template_colors.add(ch)
-    print(f"调试：模板中发现的唯一颜色值（共{len(all_template_colors)}种）: {sorted(all_template_colors)}")
+    print(f"调试：get_cell_color发现的唯一颜色值（共{len(all_template_colors)}种）: {sorted(all_template_colors)}")
     print(f"调试：SKIP_COLORS={sorted(SKIP_COLORS)}, 红色={RED_HEX}, 黄色={YELLOW_HEX}, has_leave_data={has_leave_data}")
     sys.stdout.flush()
 
