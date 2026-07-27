@@ -208,25 +208,29 @@ def get_cell_color(cell):
         """从 openpyxl Color 对象中提取 6 位 RGB"""
         if not color_obj:
             return None
-        # 优先 rgb
-        if hasattr(color_obj, 'rgb') and color_obj.rgb:
-            rgb = str(color_obj.rgb) if not isinstance(color_obj.rgb, str) else color_obj.rgb
-            if rgb and rgb != '00000000':
+        # 先获取 type，按类型分支处理（避免访问错误属性触发 descriptor 异常）
+        ctype = getattr(color_obj, 'type', None)
+
+        if ctype == 'rgb':
+            rgb = getattr(color_obj, 'rgb', None)
+            if rgb and isinstance(rgb, str) and rgb != '00000000':
                 if len(rgb) == 8:
                     return rgb[2:].upper()
                 return rgb.upper()
-        # indexed 颜色
-        if hasattr(color_obj, 'indexed') and color_obj.indexed is not None:
+
+        elif ctype == 'indexed':
             try:
-                color = COLOR_INDEX.get(int(color_obj.indexed))
-                if color:
-                    if len(color) == 8:
-                        return color[2:].upper()
-                    return color.upper()
-            except (ValueError, TypeError):
+                idx = int(color_obj.indexed)
+                if 0 <= idx < len(COLOR_INDEX):
+                    color = COLOR_INDEX[idx]
+                    if color:
+                        if len(color) == 8:
+                            return color[2:].upper()
+                        return color.upper()
+            except (ValueError, TypeError, IndexError):
                 pass
-        # theme 颜色
-        if hasattr(color_obj, 'theme') and color_obj.theme is not None:
+
+        elif ctype == 'theme':
             theme_colors = {
                 0: "000000", 1: "FFFFFF", 2: "FF0000",
                 3: "00FF00", 4: "0000FF",
@@ -237,6 +241,7 @@ def get_cell_color(cell):
                     return theme_colors[t]
             except (ValueError, TypeError):
                 pass
+
         return None
 
     # 尝试 fgColor（PatternFill / StyleProxy 都有）
