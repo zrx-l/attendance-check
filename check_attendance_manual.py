@@ -500,6 +500,8 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             for r in rows:
                 keep_rows.add(r)
 
+    if "异常数据区" in wb.sheetnames:
+        del wb["异常数据区"]
     wb.create_sheet("异常数据区")
     ws_new = wb["异常数据区"]
 
@@ -571,6 +573,8 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                            end_row=r, end_column=8)
 
     # ===== 图表区 =====
+    if "图表区" in wb.sheetnames:
+        del wb["图表区"]
     wb.create_sheet("图表区", 0)  # 插入到最前面
     ws_chart = wb["图表区"]
 
