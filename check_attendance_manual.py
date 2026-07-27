@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import re
 import argparse
 import openpyxl
-from openpyxl.styles import PatternFill, Alignment
+from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter
 from openpyxl.styles.colors import COLOR_INDEX
 
@@ -319,48 +319,39 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     modified_count = 0
     red_cells = []
 
-    # Debug: 深度检查模板单元格的fill结构
-    fill_type_samples = {}
-    fg_type_samples = {}
-    sample_details = []
-    sample_count = 0
-    for r in range(6, max_row + 1):
-        for c, _ in date_cols.items():
-            cell = ws.cell(row=r, column=c)
-            fill = cell.fill
-            ft = type(fill).__name__ if fill else "None"
-            fill_type_samples[ft] = fill_type_samples.get(ft, 0) + 1
-            fg_info = "no_fg"
-            if fill and hasattr(fill, 'fgColor') and fill.fgColor:
-                fg = fill.fgColor
-                fg_info = f"type={fg.type}"
-                if hasattr(fg, 'rgb'): fg_info += f" rgb={fg.rgb}"
-                if hasattr(fg, 'indexed'): fg_info += f" indexed={fg.indexed}"
-                if hasattr(fg, 'theme'): fg_info += f" theme={fg.theme}"
-                if hasattr(fg, 'tint'): fg_info += f" tint={fg.tint}"
-                if hasattr(fg, 'value'): fg_info += f" value={fg.value}"
-            fg_type_samples[fg_info] = fg_type_samples.get(fg_info, 0) + 1
-            if sample_count < 5:
-                sample_details.append(f"  cell({r},{c}): fill_type={ft}, fg_info={fg_info}")
-                sample_count += 1
-            if sample_count >= 5:
+    # ===== 第一遍扫描：收集每个员工的所有职级，处理合并单元格和多行情况 =====
+    def get_merged_value(row, col):
+        """读取单元格值，自动处理合并区域（返回左上角的值）"""
+        cell = ws.cell(row=row, column=col)
+        if cell.coordinate in ws.merged_cells:
+            for merged_range in ws.merged_cells.ranges:
+                if cell.coordinate in merged_range:
+                    return ws.cell(row=merged_range.min_row, column=merged_range.min_col).value
+        return cell.value
+
+    emp_job_levels = {}  # emp_id -> set of job levels
+    emp_row_map = {}     # emp_id -> list of rows
+    for row in range(6, max_row + 1):
+        emp_id_raw = get_merged_value(row, 2)  # 姓名列
+        if not emp_id_raw or str(emp_id_raw).strip() == "":
+            continue
+        emp_id = str(emp_id_raw).strip()
+        emp_row_map.setdefault(emp_id, []).append(row)
+        job_level = get_merged_value(row, 4)  # 职级列（处理合并单元格）
+        if job_level:
+            emp_job_levels.setdefault(emp_id, set()).add(str(job_level).strip())
+
+    # 计算需要隐藏的员工：只要任意一个职级匹配 HIDE_JOB_LEVELS，就隐藏所有行
+    employees_to_hide = set()
+    for emp_id, levels in emp_job_levels.items():
+        for level in levels:
+            if any(hide in level for hide in HIDE_JOB_LEVELS):
+                employees_to_hide.add(emp_id)
                 break
-        if sample_count >= 5:
-            break
-    print(f"调试：fill类型分布: {fill_type_samples}")
-    print(f"调试：fgColor属性分布: {fg_type_samples}")
-    for s in sample_details:
-        print(s)
-    # 扫描模板中所有唯一颜色值
-    all_template_colors = set()
-    for r in range(6, max_row + 1):
-        for c, _ in date_cols.items():
-            ch = get_cell_color(ws.cell(row=r, column=c))
-            if ch is not None:
-                all_template_colors.add(ch)
-    print(f"调试：get_cell_color发现的唯一颜色值（共{len(all_template_colors)}种）: {sorted(all_template_colors)}")
-    print(f"调试：SKIP_COLORS={sorted(SKIP_COLORS)}, 红色={RED_HEX}, 黄色={YELLOW_HEX}, has_leave_data={has_leave_data}")
-    sys.stdout.flush()
+
+    # 婚假/陪产假：必须一次性休完，包含周末和法定节假日
+    LEAVE_FULL_DAYS_TYPES = {"婚假", "陪产假"}
+    MAX_DAILY_HOURS = 8.0
 
     for row in range(6, max_row + 1):
         emp_cell = ws.cell(row=row, column=2)
@@ -376,14 +367,12 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             continue
         emp_id = str(emp_id).strip()
 
-        job_level = ws.cell(row=row, column=4).value
-        if job_level:
-            job_level_str = str(job_level).strip()
-            if any(level in job_level_str for level in HIDE_JOB_LEVELS):
-                rows_to_hide.append(row)
-                continue
+        # 多职级员工：如果该员工任意一个职级命中隐藏规则，则隐藏本行
+        if emp_id in employees_to_hide:
+            rows_to_hide.append(row)
+            continue
 
-        # 休假天数分配（仅当有休假数据时，按非跳过色天数均摊）
+        # 休假天数分配
         emp_leave_records = []
         for (eid, date), (leave_type, total_hours, start, end) in leaves.items():
             if eid == emp_id:
@@ -398,19 +387,34 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
 
         leave_assignment = {}
         for leave_type, total_hours, start, end in unique_records:
-            workday_count = 0
-            for col2, date2 in date_cols.items():
-                if start <= date2 <= end:
-                    color_hex = get_cell_color(ws.cell(row=row, column=col2))
-                    if color_hex is None or color_hex not in SKIP_COLORS:
-                        workday_count += 1
-            if workday_count > 0:
-                daily_hours = total_hours / workday_count
+            is_full_days_leave = leave_type in LEAVE_FULL_DAYS_TYPES
+
+            if is_full_days_leave:
+                # 婚假/陪产假：按日历天均摊（含周末和法定节假日），单日上限 8h
+                total_days = 0
+                for col2, date2 in date_cols.items():
+                    if start <= date2 <= end:
+                        total_days += 1
+                if total_days > 0:
+                    daily_hours = min(total_hours / total_days, MAX_DAILY_HOURS)
+                    for col2, date2 in date_cols.items():
+                        if start <= date2 <= end:
+                            leave_assignment[(emp_id, date2)] = (leave_type, daily_hours)
+            else:
+                # 其他假期：按工作日均摊（跳过绿/灰/白/银/黑等非工作日）
+                workday_count = 0
                 for col2, date2 in date_cols.items():
                     if start <= date2 <= end:
                         color_hex = get_cell_color(ws.cell(row=row, column=col2))
                         if color_hex is None or color_hex not in SKIP_COLORS:
-                            leave_assignment[(emp_id, date2)] = (leave_type, daily_hours)
+                            workday_count += 1
+                if workday_count > 0:
+                    daily_hours = total_hours / workday_count
+                    for col2, date2 in date_cols.items():
+                        if start <= date2 <= end:
+                            color_hex = get_cell_color(ws.cell(row=row, column=col2))
+                            if color_hex is None or color_hex not in SKIP_COLORS:
+                                leave_assignment[(emp_id, date2)] = (leave_type, daily_hours)
 
         # 逐日填充
         for col, date in date_cols.items():
