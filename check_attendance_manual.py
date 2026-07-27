@@ -440,12 +440,17 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     print(f"异常数据区行数: {len(red_rows)} 行, 列数: {len(red_cols)} 列")
     sys.stdout.flush()
 
-def run_attendance_check(start_date, end_date, department, template_file, checkin_file, leave_file, remote_file=None):
-    print("正在读取休假数据...")
-    sys.stdout.flush()
-    leaves = parse_leave_data(leave_file)
-    print(f"  共 {len(leaves)} 条请假记录（按天展开）")
-    sys.stdout.flush()
+def run_attendance_check(start_date, end_date, department, template_file, checkin_file, leave_file=None, remote_file=None):
+    leaves = {}
+    if leave_file and Path(leave_file).exists():
+        print("正在读取休假数据...")
+        sys.stdout.flush()
+        leaves = parse_leave_data(leave_file)
+        print(f"  共 {len(leaves)} 条请假记录（按天展开）")
+        sys.stdout.flush()
+    else:
+        print("未提供休假文件，跳过")
+        sys.stdout.flush()
 
     print("正在读取打卡数据...")
     sys.stdout.flush()
@@ -489,7 +494,7 @@ def main():
     parser.add_argument("--dept", default="工程造价一部", help="部门名称")
     parser.add_argument("--template", required=True, help="考勤模板文件路径")
     parser.add_argument("--checkin", required=True, help="打卡日报文件路径")
-    parser.add_argument("--leave", required=True, help="休假数据文件路径")
+    parser.add_argument("--leave", default=None, help="休假数据文件路径（可选）")
     parser.add_argument("--remote", default=None, help="远程办公文件路径（可选）")
     args = parser.parse_args()
     run_attendance_check(args.start, args.end, args.dept, args.template, args.checkin, args.leave, args.remote)
