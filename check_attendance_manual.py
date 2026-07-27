@@ -8,9 +8,10 @@ from datetime import datetime, timedelta
 import re
 import argparse
 import openpyxl
-from openpyxl.styles import Alignment
+from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 from openpyxl.styles.colors import COLOR_INDEX
+from openpyxl.chart import BarChart, PieChart, Reference
 
 # ================== 颜色常量 ==================
 GREEN_RGB = "00FF00"
@@ -258,7 +259,7 @@ def get_cell_color(cell):
 
     return None
 
-def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file):
+def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file, department="", start_date="", end_date=""):
     wb = openpyxl.load_workbook(template_path, data_only=True)
     ws = wb["报表区"]
 
@@ -485,11 +486,27 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             cell = ws.cell(row=row, column=col)
             cell.alignment = Alignment(wrap_text=True)
 
+    # ===== 异常数据区 =====
+    red_rows = set()
+    red_cols = set()
+    for (r, c) in red_cells:
+        red_rows.add(r)
+        red_cols.add(c)
+
+    # 确定保留行：若员工任意一行有红色异常，该员工所有行都保留
+    keep_rows = set()
+    for emp_id, rows in emp_row_map.items():
+        if any(r in red_rows for r in rows):
+            for r in rows:
+                keep_rows.add(r)
+
     wb.create_sheet("异常数据区")
     ws_new = wb["异常数据区"]
 
     max_col = max(date_cols.keys()) if date_cols else 46
-    for r in range(1, max_row + 1):
+
+    # 复制表头（1-5行），所有列
+    for r in range(1, 6):
         for c in range(1, max_col + 1):
             src = ws.cell(row=r, column=c)
             dst = ws_new.cell(row=r, column=c)
@@ -502,23 +519,117 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
                 dst.protection = src.protection.copy()
                 dst.alignment = src.alignment.copy()
 
-    red_rows = set()
-    red_cols = set()
-    for (r, c) in red_cells:
-        red_rows.add(r)
-        red_cols.add(c)
+    # 复制保留的数据行，只保留红色单元格内容，建立行号映射
+    old_to_new_row = {}
+    new_row = 6
+    for old_row in sorted(keep_rows):
+        for c in range(1, max_col + 1):
+            src = ws.cell(row=old_row, column=c)
+            dst = ws_new.cell(row=new_row, column=c)
+            # 日期列中，非红色单元格清空
+            if c in date_cols and (old_row, c) not in red_cells:
+                dst.value = None
+            else:
+                dst.value = src.value
+            if src.has_style:
+                dst.font = src.font.copy()
+                dst.border = src.border.copy()
+                dst.fill = src.fill.copy()
+                dst.number_format = src.number_format
+                dst.protection = src.protection.copy()
+                dst.alignment = src.alignment.copy()
+        old_to_new_row[old_row] = new_row
+        new_row += 1
 
-    for row in range(6, max_row + 1):
-        for col in date_cols.keys():
-            if (row, col) not in red_cells:
-                ws_new.cell(row=row, column=col).value = None
+    new_max_row = new_row - 1
 
-    for row in range(max_row, 5, -1):
-        if row not in red_rows:
-            ws_new.delete_rows(row)
+    # 删除没有红色异常的列（保留基本信息列 1-15）
     for col in range(max_col, 15, -1):
         if col not in red_cols:
             ws_new.delete_cols(col)
+
+    # 合并单元格
+    # 1. 同一员工连续行的 B 列(2) 和 C 列(3) 合并
+    for emp_id, rows in emp_row_map.items():
+        kept_rows = sorted([r for r in rows if r in keep_rows])
+        if len(kept_rows) <= 1:
+            continue
+        new_rows = [old_to_new_row[r] for r in kept_rows]
+        ws_new.merge_cells(start_row=new_rows[0], start_column=2,
+                           end_row=new_rows[-1], end_column=2)
+        ws_new.merge_cells(start_row=new_rows[0], start_column=3,
+                           end_row=new_rows[-1], end_column=3)
+
+    # 2. 每一行合并 D+E 列(4+5)
+    for r in range(6, new_max_row + 1):
+        ws_new.merge_cells(start_row=r, start_column=4,
+                           end_row=r, end_column=5)
+
+    # 3. 每一行合并 F+G+H 列(6+7+8)
+    for r in range(6, new_max_row + 1):
+        ws_new.merge_cells(start_row=r, start_column=6,
+                           end_row=r, end_column=8)
+
+    # ===== 图表区 =====
+    wb.create_sheet("图表区", 0)  # 插入到最前面
+    ws_chart = wb["图表区"]
+
+    # 标题
+    ws_chart["A1"] = f"{department} 考勤汇总统计"
+    ws_chart["A1"].font = Font(bold=True, size=16)
+
+    # 基本信息
+    info = [
+        ("统计期间", f"{start_date} 至 {end_date}"),
+        ("部门名称", department),
+        ("总人数", len(emp_row_map)),
+        ("实际处理人数", len(emp_row_map) - len(employees_to_hide)),
+        ("异常打卡人次", len(red_cells)),
+        ("修改单元格数", modified_count),
+    ]
+    if remote_dict:
+        info.append(("远程办公人次", len(remote_dict)))
+
+    for i, (label, value) in enumerate(info, start=3):
+        ws_chart.cell(row=i, column=1, value=label).font = Font(bold=True)
+        ws_chart.cell(row=i, column=2, value=value)
+
+    # 请假类型统计
+    leave_type_days = {}
+    for (eid, date), (leave_type, total_hours, s, e) in leaves.items():
+        leave_type_days[leave_type] = leave_type_days.get(leave_type, 0) + 1
+
+    chart_row_start = 3 + len(info) + 1
+    if leave_type_days:
+        ws_chart.cell(row=chart_row_start, column=1, value="请假类型统计").font = Font(bold=True, size=12)
+        chart_row_start += 1
+        ws_chart.cell(row=chart_row_start, column=1, value="请假类型")
+        ws_chart.cell(row=chart_row_start, column=2, value="人天")
+        chart_row_start += 1
+        row_idx = chart_row_start
+        for leave_type, count in sorted(leave_type_days.items(), key=lambda x: -x[1]):
+            ws_chart.cell(row=row_idx, column=1, value=leave_type)
+            ws_chart.cell(row=row_idx, column=2, value=count)
+            row_idx += 1
+
+        # 柱状图
+        chart = BarChart()
+        chart.type = "col"
+        chart.title = "请假类型分布"
+        chart.y_axis.title = "人天"
+        chart.x_axis.title = "请假类型"
+        chart.style = 10
+        data = Reference(ws_chart, min_col=2, min_row=chart_row_start - 1, max_row=row_idx - 1)
+        cats = Reference(ws_chart, min_col=1, min_row=chart_row_start, max_row=row_idx - 1)
+        chart.add_data(data, titles_from_data=True)
+        chart.set_categories(cats)
+        chart.width = 18
+        chart.height = 10
+        ws_chart.add_chart(chart, "D3")
+
+    # 列宽调整
+    ws_chart.column_dimensions["A"].width = 18
+    ws_chart.column_dimensions["B"].width = 15
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     wb.save(str(output_file))
@@ -526,7 +637,7 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     print(f"已生成考勤明细: {output_file}")
     print(f"隐藏职级行数: {len(rows_to_hide)}")
     print(f"实际修改单元格数: {modified_count}")
-    print(f"异常数据区行数: {len(red_rows)} 行, 列数: {len(red_cols)} 列")
+    print(f"异常数据区行数: {len([r for r in keep_rows if r >= 6])} 行, 列数: {len(red_cols)} 列")
     sys.stdout.flush()
 
 def run_attendance_check(start_date, end_date, department, template_file, checkin_file, leave_file=None, remote_file=None):
@@ -572,7 +683,7 @@ def run_attendance_check(start_date, end_date, department, template_file, checki
     filename = f"{department}考勤（{start_str}-{end_str}）.xlsx"
     output_file = output_dir / filename
 
-    process_template_openpyxl(template_file, leaves, checkins, remote_dict, output_file)
+    process_template_openpyxl(template_file, leaves, checkins, remote_dict, output_file, department, start_date, end_date)
     print("处理完成")
     sys.stdout.flush()
 
