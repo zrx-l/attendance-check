@@ -198,38 +198,59 @@ def generate_cell_text(emp_id, date, leaves, checkins):
 def get_cell_color(cell):
     """获取单元格填充色（返回6位RGB十六进制，如 FF0000）。
     兼容 ARGB 格式（8位），自动剥离 alpha 通道。
+    兼容 PatternFill 和 StyleProxy（BI模板常用）。
     """
     fill = cell.fill
-    if fill and isinstance(fill, PatternFill):
-        fg = fill.fgColor
-        if fg:
-            if hasattr(fg, 'rgb') and fg.rgb:
-                rgb = str(fg.rgb) if not isinstance(fg.rgb, str) else fg.rgb
+    if not fill:
+        return None
+
+    def _extract_rgb(color_obj):
+        """从 openpyxl Color 对象中提取 6 位 RGB"""
+        if not color_obj:
+            return None
+        # 优先 rgb
+        if hasattr(color_obj, 'rgb') and color_obj.rgb:
+            rgb = str(color_obj.rgb) if not isinstance(color_obj.rgb, str) else color_obj.rgb
+            if rgb and rgb != '00000000':
                 if len(rgb) == 8:
-                    return rgb[2:].upper()  # ARGB → 剥离 alpha
+                    return rgb[2:].upper()
                 return rgb.upper()
-            if fg.type == 'indexed':
-                color = COLOR_INDEX.get(fg.indexed)
+        # indexed 颜色
+        if hasattr(color_obj, 'indexed') and color_obj.indexed is not None:
+            try:
+                color = COLOR_INDEX.get(int(color_obj.indexed))
                 if color:
                     if len(color) == 8:
                         return color[2:].upper()
                     return color.upper()
-            if fg.type == 'theme':
-                theme_colors = {
-                    0: "000000",
-                    1: "FFFFFF",
-                    2: "FF0000",
-                    3: "00FF00",
-                    4: "0000FF",
-                }
-                if fg.theme in theme_colors:
-                    return theme_colors[fg.theme]
-        bg = fill.bgColor
-        if bg and hasattr(bg, 'rgb') and bg.rgb:
-            rgb = str(bg.rgb) if not isinstance(bg.rgb, str) else bg.rgb
-            if len(rgb) == 8:
-                return rgb[2:].upper()
-            return rgb.upper()
+            except (ValueError, TypeError):
+                pass
+        # theme 颜色
+        if hasattr(color_obj, 'theme') and color_obj.theme is not None:
+            theme_colors = {
+                0: "000000", 1: "FFFFFF", 2: "FF0000",
+                3: "00FF00", 4: "0000FF",
+            }
+            try:
+                t = int(color_obj.theme)
+                if t in theme_colors:
+                    return theme_colors[t]
+            except (ValueError, TypeError):
+                pass
+        return None
+
+    # 尝试 fgColor（PatternFill / StyleProxy 都有）
+    if hasattr(fill, 'fgColor'):
+        result = _extract_rgb(fill.fgColor)
+        if result:
+            return result
+
+    # 尝试 bgColor
+    if hasattr(fill, 'bgColor'):
+        result = _extract_rgb(fill.bgColor)
+        if result:
+            return result
+
     return None
 
 def process_template_openpyxl(template_path, leaves, checkins, remote_dict, output_file):
