@@ -282,18 +282,27 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
     print(f"扫描行数: 6 到 {max_row}（动态识别）")
     sys.stdout.flush()
 
-    # ===== 颜色规则（正向：只填充指定颜色） =====
+    # ===== 颜色规则（黑名单：跳过绿/灰/白/银/黑，其余填充） =====
     RED_HEX = "FF0000"
-    BLUE_HEX = "00CCFF"
     YELLOW_HEX = "FFCC00"
-    FILL_COLORS = {RED_HEX, BLUE_HEX, YELLOW_HEX}
-    # 跳过色（用于休假天数分配时排除非工作日）
-    SKIP_COLORS = {"00FF00", "808080", "FFFFFF", "000000", "F0F0F0"}
+    # 跳过色：绿=正常工作日 灰=非工作日 白=空白 黑=透明/无填充 浅灰/银=装饰色
+    SKIP_COLORS = {"00FF00", "808080", "FFFFFF", "000000", "F0F0F0", "C0C0C0"}
     has_leave_data = len(leaves) > 0
 
     rows_to_hide = []
     modified_count = 0
     red_cells = []
+
+    # Debug: 扫描模板中所有唯一颜色值
+    all_template_colors = set()
+    for r in range(6, max_row + 1):
+        for c, _ in date_cols.items():
+            ch = get_cell_color(ws.cell(row=r, column=c))
+            if ch is not None:
+                all_template_colors.add(ch)
+    print(f"调试：模板中发现的唯一颜色值（共{len(all_template_colors)}种）: {sorted(all_template_colors)}")
+    print(f"调试：SKIP_COLORS={sorted(SKIP_COLORS)}, 红色={RED_HEX}, 黄色={YELLOW_HEX}, has_leave_data={has_leave_data}")
+    sys.stdout.flush()
 
     for row in range(6, max_row + 1):
         emp_cell = ws.cell(row=row, column=2)
@@ -350,16 +359,20 @@ def process_template_openpyxl(template_path, leaves, checkins, remote_dict, outp
             cell = ws.cell(row=row, column=col)
             color_hex = get_cell_color(cell)
 
-            # 正向判断：只填充红/蓝/黄
+            # 黑名单判断：跳过不需要填充的颜色
+            skip = False
             if color_hex is None:
-                continue
-            if color_hex not in FILL_COLORS:
-                continue
-            # 无休假数据时跳过黄色（黄色 = 休假，无休假则无需填充）
-            if not has_leave_data and color_hex == YELLOW_HEX:
+                skip = True
+            elif color_hex in SKIP_COLORS:
+                skip = True
+            # 无休假数据时跳过黄色（黄色代表休假，无休假文件 = 不需要填休假信息）
+            elif not has_leave_data and color_hex == YELLOW_HEX:
+                skip = True
+
+            if skip:
                 continue
 
-            # 仅红色加入异常数据区
+            # 仅红色加入异常数据区（红色 = 缺卡异常）
             if color_hex == RED_HEX:
                 red_cells.append((row, col))
 
